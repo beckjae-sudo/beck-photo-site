@@ -10,7 +10,6 @@ import {
   getJsonFromR2,
 } from "@/lib/r2";
 
-// 1. Password Verification
 export async function authenticateAdmin(password: string) {
   const adminSecret = process.env.ADMIN_PASSWORD;
   if (!adminSecret || password !== adminSecret) {
@@ -21,30 +20,28 @@ export async function authenticateAdmin(password: string) {
   cookieStore.set("admin_session", "authenticated", {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    maxAge: 60 * 60 * 24 * 7, // 7 days
+    maxAge: 60 * 60 * 24 * 7,
     path: "/",
   });
 
   return { success: true };
 }
 
-// 2. Auth Check Helper
 async function checkAuth() {
   const cookieStore = await cookies();
   return cookieStore.get("admin_session")?.value === "authenticated";
 }
 
-// 3. Generate Direct R2 Upload URL
 export async function getDirectUploadUrl(key: string, contentType: string) {
   if (!(await checkAuth())) throw new Error("Unauthorized");
   return await getPresignedUploadUrl(key, contentType);
 }
 
-// 4. Save Final Manifest and Update Global Index
 export async function publishAlbumManifest(albumData: {
   album_id: string;
   title: string;
   date: string;
+  category?: string;
   photos: Array<{
     id: string;
     original_filename: string;
@@ -58,15 +55,16 @@ export async function publishAlbumManifest(albumData: {
 }) {
   if (!(await checkAuth())) throw new Error("Unauthorized");
 
-  // Save album manifest
+  const category = albumData.category || "School Sports";
+
   await uploadJsonToR2(`${albumData.album_id}/manifest.json`, {
     album_id: albumData.album_id,
     title: albumData.title,
     date: albumData.date,
+    category,
     photos: albumData.photos,
   });
 
-  // Update albums.json
   const existingAlbums = (await getJsonFromR2<any[]>("albums.json")) || [];
   const updatedAlbums = existingAlbums.filter((a) => a.id !== albumData.album_id);
 
@@ -74,6 +72,7 @@ export async function publishAlbumManifest(albumData: {
     id: albumData.album_id,
     title: albumData.title,
     date: albumData.date,
+    category,
     photo_count: albumData.photos.length,
     cover_url: albumData.cover_url || albumData.photos[0]?.urls.thumb || "",
   });
@@ -84,13 +83,11 @@ export async function publishAlbumManifest(albumData: {
   return { success: true };
 }
 
-// 5. Fetch Single Album Manifest (For the Edit Page)
 export async function getAlbumForEditing(albumId: string) {
   if (!(await checkAuth())) throw new Error("Unauthorized");
   return await getJsonFromR2<any>(`${albumId}/manifest.json`);
 }
 
-// 6. Delete Photos from R2 Storage
 export async function deletePhotoFromR2(photoKeys: string[]) {
   if (!(await checkAuth())) throw new Error("Unauthorized");
 
@@ -109,25 +106,26 @@ export async function deletePhotoFromR2(photoKeys: string[]) {
   return { success: true };
 }
 
-// 7. Update an Existing Album (Edits, Reorders, New Photos)
 export async function updateExistingAlbum(albumData: {
   album_id: string;
   title: string;
   date: string;
+  category?: string;
   photos: any[];
   cover_url: string;
 }) {
   if (!(await checkAuth())) throw new Error("Unauthorized");
 
-  // Overwrite the existing manifest.json in R2
+  const category = albumData.category || "School Sports";
+
   await uploadJsonToR2(`${albumData.album_id}/manifest.json`, {
     album_id: albumData.album_id,
     title: albumData.title,
     date: albumData.date,
+    category,
     photos: albumData.photos,
   });
 
-  // Update the album's entry in albums.json
   const existingAlbums = (await getJsonFromR2<any[]>("albums.json")) || [];
   const updatedAlbums = existingAlbums.map((a) => {
     if (a.id === albumData.album_id) {
@@ -135,6 +133,7 @@ export async function updateExistingAlbum(albumData: {
         ...a,
         title: albumData.title,
         date: albumData.date,
+        category,
         photo_count: albumData.photos.length,
         cover_url: albumData.cover_url || a.cover_url,
       };
@@ -143,5 +142,33 @@ export async function updateExistingAlbum(albumData: {
   });
 
   await uploadJsonToR2("albums.json", updatedAlbums);
+  return { success: true };
+}
+
+// Site Config Read/Write
+export async function getSiteConfig() {
+  const config = await getJsonFromR2<any>("site_config.json");
+  return (
+    config || {
+      site_title: "Sports Photo Gallery",
+      badge_text: "Corvian Sports & Action",
+      hero_headline: "Game Day Highlights",
+      hero_description: "Browse recent game albums and download high-resolution photos.",
+      theme_preset: "slate-glow",
+      categories: ["School Sports", "Travel Teams", "Other Activities"],
+    }
+  );
+}
+
+export async function saveSiteConfig(newConfig: {
+  site_title: string;
+  badge_text: string;
+  hero_headline: string;
+  hero_description: string;
+  theme_preset: string;
+  categories: string[];
+}) {
+  if (!(await checkAuth())) throw new Error("Unauthorized");
+  await uploadJsonToR2("site_config.json", newConfig);
   return { success: true };
 }
