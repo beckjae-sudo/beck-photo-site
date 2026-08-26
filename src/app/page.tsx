@@ -1,8 +1,6 @@
 import HomeGalleryView, { AlbumSummary, SiteConfig } from "@/components/HomeGalleryView";
 
-// Force dynamic rendering so edits made in /admin appear instantly
 export const dynamic = "force-dynamic";
-export const revalidate = 0;
 
 async function getHomePageData(): Promise<{ albums: AlbumSummary[]; config: SiteConfig }> {
   const baseUrl = process.env.NEXT_PUBLIC_R2_BASE_URL?.replace(/\/$/, "");
@@ -34,7 +32,7 @@ async function getHomePageData(): Promise<{ albums: AlbumSummary[]; config: Site
   }
 }
 
-export default async function HomePage() {
+export default async function Page() {
   const { albums, config } = await getHomePageData();
   return <HomeGalleryView albums={albums} config={config} />;
 }
