@@ -1,91 +1,56 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
-import { authenticateAdmin, getDirectUploadUrl, publishAlbumManifest } from "./actions";
-import { processImageInBrowser, ProcessedPhoto } from "@/lib/clientImageProcessor";
-import {
-  Upload,
-  Star,
-  Trash2,
-  CheckCircle2,
-  Lock,
-  Loader2,
-  ArrowLeft,
-  AlertTriangle,
-  Edit3,
-  Calendar,
-  Images,
-} from "lucide-react";
+import { useEffect, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import {
+  getAlbumForEditing,
+  updateExistingAlbum,
+  deletePhotoFromR2,
+  getDirectUploadUrl,
+} from "@/app/admin/actions";
+import { processImageInBrowser, ProcessedPhoto } from "@/lib/clientImageProcessor";
+import { Star, Trash2, ArrowLeft, Loader2, Upload, Save, CheckCircle2 } from "lucide-react";
 
-interface AlbumSummary {
-  id: string;
-  title: string;
-  date: string;
-  photo_count: number;
-  cover_url: string;
-}
+export default function EditAlbumPage() {
+  const params = useParams();
+  const router = useRouter();
+  const albumId = params?.id as string;
 
-export default function AdminPage() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [password, setPassword] = useState("");
-  const [authError, setAuthError] = useState("");
-
-  const [existingAlbums, setExistingAlbums] = useState<AlbumSummary[]>([]);
+  const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState("");
-  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
-  const [photos, setPhotos] = useState<ProcessedPhoto[]>([]);
-  const [coverPhotoUid, setCoverPhotoUid] = useState<string | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState("");
-  const [isDone, setIsDone] = useState(false);
+  const [date, setDate] = useState("");
+  const [existingPhotos, setExistingPhotos] = useState<any[]>([]);
+  const [newPhotos, setNewPhotos] = useState<ProcessedPhoto[]>([]);
+  const [coverUrl, setCoverUrl] = useState("");
+  const [deletedPhotoKeys, setDeletedPhotoKeys] = useState<string[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState("");
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
-  // Load existing albums whenever authenticated or after publishing
   useEffect(() => {
-    if (isAuthenticated) {
-      const baseUrl = process.env.NEXT_PUBLIC_R2_BASE_URL?.replace(/\/$/, "");
-      if (baseUrl) {
-        fetch(`${baseUrl}/albums.json`, { cache: "no-store" })
-          .then((res) => (res.ok ? res.json() : []))
-          .then((data) => setExistingAlbums(data))
-          .catch(() => setExistingAlbums([]));
+    async function loadAlbum() {
+      try {
+        const data = await getAlbumForEditing(albumId);
+        if (data) {
+          setTitle(data.title || "");
+          setDate(data.date || "");
+          setExistingPhotos(data.photos || []);
+          setCoverUrl(data.photos?.[0]?.urls?.thumb || "");
+        }
+      } catch {
+        alert("Could not load album or unauthorized.");
+        router.push("/admin");
+      } finally {
+        setLoading(false);
       }
     }
-  }, [isAuthenticated, isDone]);
+    if (albumId) loadAlbum();
+  }, [albumId, router]);
 
-  // Duplicate detection
-  const duplicateUids = useMemo(() => {
-    const counts = new Map<string, string[]>();
-    photos.forEach((p) => {
-      const existing = counts.get(p.fingerprint) || [];
-      counts.set(p.fingerprint, [...existing, p.uid]);
-    });
-
-    const dupes = new Set<string>();
-    counts.forEach((uids) => {
-      if (uids.length > 1) {
-        uids.slice(1).forEach((id) => dupes.add(id));
-      }
-    });
-    return dupes;
-  }, [photos]);
-
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const res = await authenticateAdmin(password);
-    if (res.success) {
-      setIsAuthenticated(true);
-      setAuthError("");
-    } else {
-      setAuthError(res.error || "Access Denied");
-    }
-  };
-
-  const handleFiles = async (files: FileList | null) => {
+  const handleNewFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
-    setIsProcessing(true);
-    setUploadProgress("Analyzing photos & metadata...");
-
+    setSaveStatus("Reading new photos...");
     const processed: ProcessedPhoto[] = [];
     for (let i = 0; i < files.length; i++) {
       if (files[i].type.startsWith("image/")) {
@@ -93,44 +58,47 @@ export default function AdminPage() {
         processed.push(item);
       }
     }
-
-    setPhotos((prev) => {
-      const next = [...prev, ...processed];
-      if (!coverPhotoUid && next.length > 0) {
-        setCoverPhotoUid(next[0].uid);
-      }
-      return next;
-    });
-
-    setIsProcessing(false);
-    setUploadProgress("");
+    setNewPhotos((prev) => [...prev, ...processed]);
+    setSaveStatus("");
   };
 
-  const removeAllDuplicates = () => {
-    setPhotos((prev) => prev.filter((p) => !duplicateUids.has(p.uid)));
+  const removeExistingPhoto = (photo: any) => {
+    const baseUrl = process.env.NEXT_PUBLIC_R2_BASE_URL?.replace(/\/$/, "") || "";
+    const thumbKey = photo.urls.thumb.replace(`${baseUrl}/`, "");
+    const displayKey = photo.urls.display.replace(`${baseUrl}/`, "");
+    const origKey = photo.urls.original.replace(`${baseUrl}/`, "");
+
+    setDeletedPhotoKeys((prev) => [...prev, thumbKey, displayKey, origKey]);
+    const updated = existingPhotos.filter((p) => p.id !== photo.id);
+    setExistingPhotos(updated);
+
+    if (coverUrl === photo.urls.thumb && updated.length > 0) {
+      setCoverUrl(updated[0].urls.thumb);
+    }
   };
 
-  const handlePublish = async () => {
-    if (!title.trim()) return alert("Please enter an Album Title.");
-    if (photos.length === 0) return alert("Please add at least one photo.");
-
-    setIsProcessing(true);
-    const slug = `${date}-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+  const handleSave = async () => {
+    if (!title.trim()) return alert("Album Title cannot be empty.");
+    setIsSaving(true);
     const baseUrl = process.env.NEXT_PUBLIC_R2_BASE_URL?.replace(/\/$/, "");
 
     try {
-      const uploadedPhotosList = [];
-      let finalCoverUrl = "";
+      if (deletedPhotoKeys.length > 0) {
+        setSaveStatus("Removing deleted photos from storage...");
+        await deletePhotoFromR2(deletedPhotoKeys);
+      }
 
-      for (let i = 0; i < photos.length; i++) {
-        const p = photos[i];
-        const photoId = `${slug}_${String(i + 1).padStart(3, "0")}`;
-        setUploadProgress(`Uploading photo ${i + 1} of ${photos.length}...`);
+      const newlyUploadedList: any[] = [];
+      for (let i = 0; i < newPhotos.length; i++) {
+        const p = newPhotos[i];
+        const nextIndex = existingPhotos.length + i + 1;
+        const photoId = `${albumId}_${String(nextIndex).padStart(3, "0")}`;
+        setSaveStatus(`Uploading new photo ${i + 1} of ${newPhotos.length}...`);
 
-        const thumbKey = `${slug}/thumb/${photoId}.webp`;
-        const displayKey = `${slug}/display/${photoId}.webp`;
+        const thumbKey = `${albumId}/thumb/${photoId}.webp`;
+        const displayKey = `${albumId}/display/${photoId}.webp`;
         const origExt = p.originalName.substring(p.originalName.lastIndexOf("."));
-        const origKey = `${slug}/original/${photoId}${origExt}`;
+        const origKey = `${albumId}/original/${photoId}${origExt}`;
 
         const [thumbUrl, displayUrl, origUrl] = await Promise.all([
           getDirectUploadUrl(thumbKey, "image/webp"),
@@ -144,19 +112,14 @@ export default function AdminPage() {
           fetch(origUrl, { method: "PUT", body: p.file, headers: { "Content-Type": p.file.type } }),
         ]);
 
-        const photoThumbPublicUrl = `${baseUrl}/${thumbKey}`;
-        if (p.uid === coverPhotoUid || (!finalCoverUrl && i === 0)) {
-          finalCoverUrl = photoThumbPublicUrl;
-        }
-
-        uploadedPhotosList.push({
+        newlyUploadedList.push({
           id: photoId,
           original_filename: p.originalName,
           width: p.width,
           height: p.height,
           aspect_ratio: p.aspectRatio,
           urls: {
-            thumb: photoThumbPublicUrl,
+            thumb: `${baseUrl}/${thumbKey}`,
             display: `${baseUrl}/${displayKey}`,
             original: `${baseUrl}/${origKey}`,
           },
@@ -164,69 +127,47 @@ export default function AdminPage() {
         });
       }
 
-      setUploadProgress("Finalizing album manifest...");
+      setSaveStatus("Saving changes...");
+      const finalPhotosList = [...existingPhotos, ...newlyUploadedList];
+      const finalCoverUrl = coverUrl || finalPhotosList[0]?.urls?.thumb || "";
 
-      await publishAlbumManifest({
-        album_id: slug,
+      await updateExistingAlbum({
+        album_id: albumId,
         title,
         date,
-        photos: uploadedPhotosList,
+        photos: finalPhotosList,
         cover_url: finalCoverUrl,
       });
 
-      setIsDone(true);
+      setSaveSuccess(true);
     } catch (err: any) {
-      alert(`Upload failed: ${err.message}`);
+      alert(`Save failed: ${err.message}`);
     } finally {
-      setIsProcessing(false);
-      setUploadProgress("");
+      setIsSaving(false);
+      setSaveStatus("");
     }
   };
 
-  if (!isAuthenticated) {
+  if (loading) {
     return (
-      <div className="min-h-screen bg-neutral-950 flex items-center justify-center p-4">
-        <form onSubmit={handleLogin} className="w-full max-w-sm bg-neutral-900 border border-neutral-800 rounded-2xl p-6 space-y-4">
-          <div className="flex items-center gap-2 text-white font-bold text-lg">
-            <Lock size={18} className="text-blue-500" /> Admin Studio
-          </div>
-          <p className="text-xs text-neutral-400">Enter your master password to manage albums.</p>
-          <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white text-sm focus:outline-none focus:border-neutral-600"
-          />
-          {authError && <p className="text-xs text-red-400">{authError}</p>}
-          <button type="submit" className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-semibold transition">
-            Unlock Studio
-          </button>
-        </form>
+      <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-white gap-2">
+        <Loader2 className="animate-spin text-blue-500" /> Loading album details...
       </div>
     );
   }
 
-  if (isDone) {
+  if (saveSuccess) {
     return (
       <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center p-4 text-center space-y-4">
         <CheckCircle2 size={48} className="text-emerald-500" />
-        <h1 className="text-2xl font-bold text-white">Album Published!</h1>
-        <p className="text-neutral-400 text-sm">Your game has been processed, uploaded to R2, and indexed.</p>
+        <h1 className="text-2xl font-bold text-white">Album Updated!</h1>
+        <p className="text-neutral-400 text-sm">Your changes are live.</p>
         <div className="flex gap-4">
-          <button
-            onClick={() => {
-              setIsDone(false);
-              setPhotos([]);
-              setTitle("");
-              setCoverPhotoUid(null);
-            }}
-            className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-white rounded-lg text-sm"
-          >
-            Upload Another
-          </button>
-          <Link href="/" className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-semibold">
-            View Live Gallery
+          <Link href="/admin" className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-white rounded-lg text-sm">
+            Back to Admin
+          </Link>
+          <Link href={`/album/${albumId}`} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-semibold">
+            View Live Album
           </Link>
         </div>
       </div>
@@ -234,210 +175,135 @@ export default function AdminPage() {
   }
 
   return (
-    <main className="min-h-screen bg-neutral-950 text-neutral-100 p-6 md:p-12 max-w-6xl mx-auto space-y-10">
-      {/* Top Header */}
+    <main className="min-h-screen bg-neutral-950 text-neutral-100 p-6 md:p-12 max-w-6xl mx-auto space-y-8">
       <div className="flex items-center justify-between border-b border-neutral-800 pb-4">
         <div>
-          <h1 className="text-2xl font-bold text-white">Admin Studio</h1>
-          <p className="text-xs text-neutral-400">Manage published games or create new albums.</p>
+          <h1 className="text-2xl font-bold text-white">Edit Album</h1>
+          <p className="text-xs text-neutral-400">ID: {albumId}</p>
         </div>
-        <Link href="/" className="text-xs text-neutral-400 hover:text-white flex items-center gap-1">
-          <ArrowLeft size={14} /> Exit Admin
+        <Link href="/admin" className="text-xs text-neutral-400 hover:text-white flex items-center gap-1">
+          <ArrowLeft size={14} /> Back to Studio
         </Link>
       </div>
 
-      {/* Section 1: Manage Existing Albums */}
-      {existingAlbums.length > 0 && (
-        <section className="space-y-3">
-          <h2 className="text-sm font-bold text-neutral-300">Published Albums ({existingAlbums.length})</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-            {existingAlbums.map((a) => (
-              <div
-                key={a.id}
-                className="flex items-center justify-between p-3.5 rounded-xl bg-neutral-900 border border-neutral-800/80 hover:border-neutral-700 transition"
-              >
-                <div className="truncate pr-3 space-y-0.5">
-                  <p className="text-xs font-semibold text-white truncate">{a.title}</p>
-                  <div className="flex items-center gap-2 text-[11px] text-neutral-400">
-                    <span className="flex items-center gap-1">
-                      <Calendar size={11} /> {a.date}
-                    </span>
-                    <span>•</span>
-                    <span className="flex items-center gap-1">
-                      <Images size={11} /> {a.photo_count}
-                    </span>
-                  </div>
-                </div>
-                <Link
-                  href={`/admin/edit/${a.id}`}
-                  className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-white transition shrink-0"
-                >
-                  <Edit3 size={13} /> Edit
-                </Link>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Section 2: Upload New Album */}
-      <section className="space-y-6 pt-4 border-t border-neutral-900">
-        <h2 className="text-sm font-bold text-neutral-300">Create New Game Album</h2>
-
-        {/* Album Metadata Fields */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-neutral-300">Album Title</label>
-            <input
-              type="text"
-              placeholder="e.g. Corvian vs Pine Lake Prep"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-white text-sm focus:outline-none focus:border-neutral-600"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-neutral-300">Event Date</label>
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-white text-sm focus:outline-none focus:border-neutral-600"
-            />
-          </div>
-        </div>
-
-        {/* Dropzone */}
-        <div
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            e.preventDefault();
-            handleFiles(e.dataTransfer.files);
-          }}
-          className="border-2 border-dashed border-neutral-800 hover:border-neutral-700 bg-neutral-900/50 rounded-2xl p-8 text-center transition flex flex-col items-center justify-center gap-3 cursor-pointer"
-          onClick={() => document.getElementById("photo-input")?.click()}
-        >
-          <Upload size={32} className="text-neutral-500" />
-          <div>
-            <p className="text-sm font-semibold text-white">Drag & drop game photos here, or click to browse</p>
-            <p className="text-xs text-neutral-500 mt-1">Accepts standard JPEG & PNG exports</p>
-          </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-neutral-300">Album Title</label>
           <input
-            id="photo-input"
-            type="file"
-            multiple
-            accept="image/jpeg,image/png"
-            className="hidden"
-            onChange={(e) => handleFiles(e.target.files)}
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-white text-sm focus:outline-none focus:border-neutral-600"
           />
         </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-neutral-300">Event Date</label>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-white text-sm focus:outline-none focus:border-neutral-600"
+          />
+        </div>
+      </div>
 
-        {/* Duplicate Banner */}
-        {duplicateUids.size > 0 && (
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl gap-3">
-            <div className="flex items-center gap-2.5 text-amber-300 text-sm">
-              <AlertTriangle size={18} className="text-amber-400 shrink-0" />
-              <span>
-                Found <strong>{duplicateUids.size}</strong> duplicate photo{duplicateUids.size > 1 ? "s" : ""}.
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={removeAllDuplicates}
-              className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-black font-semibold text-xs rounded-lg transition"
-            >
-              Remove All Duplicates
-            </button>
-          </div>
-        )}
+      <div
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault();
+          handleNewFiles(e.dataTransfer.files);
+        }}
+        className="border-2 border-dashed border-neutral-800 hover:border-neutral-700 bg-neutral-900/40 rounded-xl p-6 text-center transition flex flex-col items-center justify-center gap-2 cursor-pointer"
+        onClick={() => document.getElementById("add-photos-input")?.click()}
+      >
+        <Upload size={24} className="text-neutral-500" />
+        <p className="text-xs font-semibold text-neutral-300">Add more photos to this album</p>
+        <input
+          id="add-photos-input"
+          type="file"
+          multiple
+          accept="image/jpeg,image/png"
+          className="hidden"
+          onChange={(e) => handleNewFiles(e.target.files)}
+        />
+      </div>
 
-        {/* Selected Photos Grid */}
-        {photos.length > 0 && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-neutral-300">Selected Photos ({photos.length})</h3>
-              <span className="text-xs text-neutral-500">Gold star marks the cover shot</span>
-            </div>
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-bold text-neutral-300">
+            Photos ({existingPhotos.length + newPhotos.length})
+          </h2>
+          <span className="text-xs text-neutral-500">Gold star marks the current cover</span>
+        </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-              {photos.map((p) => {
-                const isCover = coverPhotoUid === p.uid;
-                const isDuplicate = duplicateUids.has(p.uid);
-
-                return (
-                  <div
-                    key={p.uid}
-                    className={`group relative rounded-xl overflow-hidden border ${
-                      isCover
-                        ? "border-amber-500 ring-2 ring-amber-500/40"
-                        : isDuplicate
-                        ? "border-red-500/60 ring-1 ring-red-500/30"
-                        : "border-neutral-800"
-                    } bg-neutral-900 flex flex-col justify-between`}
-                  >
-                    <div className="relative aspect-4/3 w-full bg-neutral-950 overflow-hidden">
-                      <img src={p.previewUrl} alt={p.originalName} className="w-full h-full object-cover" />
-
-                      <button
-                        type="button"
-                        onClick={() => setCoverPhotoUid(p.uid)}
-                        className={`absolute top-2 left-2 p-1.5 rounded-lg backdrop-blur-md transition ${
-                          isCover ? "bg-amber-500 text-black" : "bg-black/60 text-neutral-400 hover:text-white"
-                        }`}
-                        title={isCover ? "Cover Photo" : "Set as Cover"}
-                      >
-                        <Star size={13} fill={isCover ? "currentColor" : "none"} />
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const updated = photos.filter((x) => x.uid !== p.uid);
-                          setPhotos(updated);
-                          if (isCover && updated.length > 0) {
-                            setCoverPhotoUid(updated[0].uid);
-                          }
-                        }}
-                        className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/60 text-neutral-400 hover:text-red-400 backdrop-blur-md opacity-0 group-hover:opacity-100 transition"
-                        title="Remove"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-
-                      {isDuplicate && (
-                        <div className="absolute bottom-2 left-2 px-1.5 py-0.5 rounded bg-red-500/90 text-[10px] font-semibold text-white">
-                          Duplicate
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="p-2 text-[11px] text-neutral-400 truncate border-t border-neutral-800/60">
-                      {p.originalName}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Publish Actions */}
-            <div className="pt-4 flex items-center justify-end gap-4 border-t border-neutral-800">
-              {uploadProgress && (
-                <span className="text-xs text-neutral-400 flex items-center gap-2">
-                  <Loader2 size={14} className="animate-spin text-blue-500" />
-                  {uploadProgress}
-                </span>
-              )}
-              <button
-                onClick={handlePublish}
-                disabled={isProcessing}
-                className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg text-sm font-semibold transition"
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+          {existingPhotos.map((photo) => {
+            const isCover = coverUrl === photo.urls.thumb;
+            return (
+              <div
+                key={photo.id}
+                className={`group relative rounded-xl overflow-hidden border ${
+                  isCover ? "border-amber-500 ring-2 ring-amber-500/40" : "border-neutral-800"
+                } bg-neutral-900 aspect-4/3`}
               >
-                {isProcessing ? "Uploading to Cloud..." : "Publish Album"}
+                <img src={photo.urls.thumb} alt={photo.original_filename} className="w-full h-full object-cover" />
+                <button
+                  type="button"
+                  onClick={() => setCoverUrl(photo.urls.thumb)}
+                  className={`absolute top-2 left-2 p-1.5 rounded-lg backdrop-blur-md transition ${
+                    isCover ? "bg-amber-500 text-black" : "bg-black/60 text-neutral-400 hover:text-white"
+                  }`}
+                  title="Set as Cover"
+                >
+                  <Star size={13} fill={isCover ? "currentColor" : "none"} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => removeExistingPhoto(photo)}
+                  className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/60 text-neutral-400 hover:text-red-400 backdrop-blur-md opacity-0 group-hover:opacity-100 transition"
+                  title="Delete from Album"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            );
+          })}
+
+          {newPhotos.map((p) => (
+            <div key={p.uid} className="relative rounded-xl overflow-hidden border border-blue-500/50 bg-neutral-900 aspect-4/3">
+              <img src={p.previewUrl} alt={p.originalName} className="w-full h-full object-cover" />
+              <div className="absolute bottom-2 left-2 px-1.5 py-0.5 rounded bg-blue-600/90 text-[10px] font-semibold text-white backdrop-blur-sm">
+                New
+              </div>
+              <button
+                type="button"
+                onClick={() => setNewPhotos(newPhotos.filter((x) => x.uid !== p.uid))}
+                className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/60 text-neutral-400 hover:text-red-400 backdrop-blur-md transition"
+                title="Cancel Add"
+              >
+                <Trash2 size={13} />
               </button>
             </div>
-          </div>
-        )}
-      </section>
+          ))}
+        </div>
+
+        <div className="pt-6 flex items-center justify-end gap-4 border-t border-neutral-800">
+          {saveStatus && (
+            <span className="text-xs text-neutral-400 flex items-center gap-2">
+              <Loader2 size={14} className="animate-spin text-blue-500" />
+              {saveStatus}
+            </span>
+          )}
+          <button
+            onClick={handleSave}
+            disabled={isSaving}
+            className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-sm font-semibold transition"
+          >
+            <Save size={15} />
+            {isSaving ? "Saving..." : "Save Changes"}
+          </button>
+        </div>
+      </div>
     </main>
   );
 }
