@@ -1,108 +1,107 @@
 "use server";
 
+import { S3Client, PutObjectCommand, DeleteObjectsCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { cookies } from "next/headers";
-import { DeleteObjectCommand } from "@aws-sdk/client-s3";
-import {
-  s3,
-  BUCKET_NAME,
-  getPresignedUploadUrl,
-  uploadJsonToR2,
-  getJsonFromR2,
-} from "@/lib/r2";
 
-export async function authenticateAdmin(password: string) {
-  const adminSecret = process.env.ADMIN_PASSWORD;
-  if (!adminSecret || password !== adminSecret) {
-    return { success: false, error: "Invalid password" };
-  }
+const r2 = new S3Client({
+  region: "auto",
+  endpoint: process.env.R2_ENDPOINT,
+  credentials: {
+    accessKeyId: process.env.R2_ACCESS_KEY_ID || "",
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || "",
+  },
+});
 
+const BUCKET_NAME = process.env.R2_BUCKET_NAME || "";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
+
+export async function checkAdminAuth(): Promise<boolean> {
   const cookieStore = await cookies();
-  cookieStore.set("admin_session", "authenticated", {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    maxAge: 60 * 60 * 24 * 7,
-    path: "/",
+  const authCookie = cookieStore.get("admin_session");
+  return authCookie?.value === "authenticated";
+}
+
+export async function loginAdmin(password: string): Promise<{ success: boolean }> {
+  if (password === ADMIN_PASSWORD) {
+    const cookieStore = await cookies();
+    cookieStore.set("admin_session", "authenticated", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 60 * 60 * 24 * 7, // 1 week
+      path: "/",
+    });
+    return { success: true };
+  }
+  return { success: false };
+}
+
+export async function getDirectUploadUrl(key: string, contentType: string): Promise<string> {
+  const isAuth = await checkAdminAuth();
+  if (!isAuth) throw new Error("Unauthorized");
+
+  const command = new PutObjectCommand({
+    Bucket: BUCKET_NAME,
+    Key: key,
+    ContentType: contentType,
   });
 
-  return { success: true };
+  return await getSignedUrl(r2, command, { expiresIn: 3600 });
 }
 
-async function checkAuth() {
-  const cookieStore = await cookies();
-  return cookieStore.get("admin_session")?.value === "authenticated";
-}
-
-export async function getDirectUploadUrl(key: string, contentType: string) {
-  if (!(await checkAuth())) throw new Error("Unauthorized");
-  return await getPresignedUploadUrl(key, contentType);
-}
-
-export async function publishAlbumManifest(albumData: {
+export async function createAlbum(albumData: {
   album_id: string;
   title: string;
   date: string;
   category?: string;
-  photos: Array<{
-    id: string;
-    original_filename: string;
-    width: number;
-    height: number;
-    aspect_ratio: number;
-    urls: { thumb: string; display: string; original: string };
-    metadata?: Record<string, string>;
-  }>;
+  photos: any[];
   cover_url: string;
 }) {
-  if (!(await checkAuth())) throw new Error("Unauthorized");
+  const isAuth = await checkAdminAuth();
+  if (!isAuth) throw new Error("Unauthorized");
 
-  const category = albumData.category || "School Sports";
+  // 1. Write album manifest.json
+  await r2.send(
+    new PutObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: `${albumData.album_id}/manifest.json`,
+      Body: JSON.stringify(albumData, null, 2),
+      ContentType: "application/json",
+    })
+  );
 
-  await uploadJsonToR2(`${albumData.album_id}/manifest.json`, {
-    album_id: albumData.album_id,
-    title: albumData.title,
-    date: albumData.date,
-    category,
-    photos: albumData.photos,
-  });
+  // 2. Update global albums.json index
+  const baseUrl = process.env.NEXT_PUBLIC_R2_BASE_URL?.replace(/\/$/, "");
+  let albums: any[] = [];
+  try {
+    const res = await fetch(`${baseUrl}/albums.json`, { cache: "no-store" });
+    if (res.ok) {
+      albums = await res.json();
+    }
+  } catch (e) {
+    console.warn("No existing albums.json found, creating fresh array.");
+  }
 
-  const existingAlbums = (await getJsonFromR2<any[]>("albums.json")) || [];
-  const updatedAlbums = existingAlbums.filter((a) => a.id !== albumData.album_id);
-
-  updatedAlbums.unshift({
+  const newSummary = {
     id: albumData.album_id,
     title: albumData.title,
     date: albumData.date,
-    category,
+    category: albumData.category || "School Sports",
     photo_count: albumData.photos.length,
-    cover_url: albumData.cover_url || albumData.photos[0]?.urls.thumb || "",
-  });
+    cover_url: albumData.cover_url,
+  };
 
-  updatedAlbums.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-  await uploadJsonToR2("albums.json", updatedAlbums);
+  const updatedAlbums = [newSummary, ...albums.filter((a) => a.id !== albumData.album_id)];
 
-  return { success: true };
-}
+  await r2.send(
+    new PutObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: "albums.json",
+      Body: JSON.stringify(updatedAlbums, null, 2),
+      ContentType: "application/json",
+    })
+  );
 
-export async function getAlbumForEditing(albumId: string) {
-  if (!(await checkAuth())) throw new Error("Unauthorized");
-  return await getJsonFromR2<any>(`${albumId}/manifest.json`);
-}
-
-export async function deletePhotoFromR2(photoKeys: string[]) {
-  if (!(await checkAuth())) throw new Error("Unauthorized");
-
-  for (const key of photoKeys) {
-    try {
-      await s3.send(
-        new DeleteObjectCommand({
-          Bucket: BUCKET_NAME,
-          Key: key,
-        })
-      );
-    } catch (err) {
-      console.error(`Failed to delete ${key}:`, err);
-    }
-  }
   return { success: true };
 }
 
@@ -114,61 +113,88 @@ export async function updateExistingAlbum(albumData: {
   photos: any[];
   cover_url: string;
 }) {
-  if (!(await checkAuth())) throw new Error("Unauthorized");
+  const isAuth = await checkAdminAuth();
+  if (!isAuth) throw new Error("Unauthorized");
 
-  const category = albumData.category || "School Sports";
+  // 1. Overwrite manifest.json
+  await r2.send(
+    new PutObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: `${albumData.album_id}/manifest.json`,
+      Body: JSON.stringify(albumData, null, 2),
+      ContentType: "application/json",
+    })
+  );
 
-  await uploadJsonToR2(`${albumData.album_id}/manifest.json`, {
-    album_id: albumData.album_id,
-    title: albumData.title,
-    date: albumData.date,
-    category,
-    photos: albumData.photos,
-  });
+  // 2. Update albums.json
+  const baseUrl = process.env.NEXT_PUBLIC_R2_BASE_URL?.replace(/\/$/, "");
+  let albums: any[] = [];
+  try {
+    const res = await fetch(`${baseUrl}/albums.json`, { cache: "no-store" });
+    if (res.ok) {
+      albums = await res.json();
+    }
+  } catch (e) {
+    console.warn("Could not fetch albums.json");
+  }
 
-  const existingAlbums = (await getJsonFromR2<any[]>("albums.json")) || [];
-  const updatedAlbums = existingAlbums.map((a) => {
+  const updatedAlbums = albums.map((a) => {
     if (a.id === albumData.album_id) {
       return {
         ...a,
         title: albumData.title,
         date: albumData.date,
-        category,
+        category: albumData.category || "School Sports",
         photo_count: albumData.photos.length,
-        cover_url: albumData.cover_url || a.cover_url,
+        cover_url: albumData.cover_url,
       };
     }
     return a;
   });
 
-  await uploadJsonToR2("albums.json", updatedAlbums);
+  await r2.send(
+    new PutObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: "albums.json",
+      Body: JSON.stringify(updatedAlbums, null, 2),
+      ContentType: "application/json",
+    })
+  );
+
   return { success: true };
 }
 
-// Site Config Read/Write
-export async function getSiteConfig() {
-  const config = await getJsonFromR2<any>("site_config.json");
-  return (
-    config || {
-      site_title: "Sports Photo Gallery",
-      badge_text: "Corvian Sports & Action",
-      hero_headline: "Game Day Highlights",
-      hero_description: "Browse recent game albums and download high-resolution photos.",
-      theme_preset: "slate-glow",
-      categories: ["School Sports", "Travel Teams", "Other Activities"],
-    }
+export async function deletePhotoFromR2(keys: string[]) {
+  const isAuth = await checkAdminAuth();
+  if (!isAuth) throw new Error("Unauthorized");
+
+  if (keys.length === 0) return { success: true };
+
+  await r2.send(
+    new DeleteObjectsCommand({
+      Bucket: BUCKET_NAME,
+      Delete: {
+        Objects: keys.map((Key) => ({ Key })),
+        Quiet: true,
+      },
+    })
   );
+
+  return { success: true };
 }
 
-export async function saveSiteConfig(newConfig: {
-  site_title: string;
-  badge_text: string;
-  hero_headline: string;
-  hero_description: string;
-  theme_preset: string;
-  categories: string[];
-}) {
-  if (!(await checkAuth())) throw new Error("Unauthorized");
-  await uploadJsonToR2("site_config.json", newConfig);
+export async function saveSiteConfig(config: any) {
+  const isAuth = await checkAdminAuth();
+  if (!isAuth) throw new Error("Unauthorized");
+
+  await r2.send(
+    new PutObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: "site_config.json",
+      Body: JSON.stringify(config, null, 2),
+      ContentType: "application/json",
+    })
+  );
+
   return { success: true };
 }
