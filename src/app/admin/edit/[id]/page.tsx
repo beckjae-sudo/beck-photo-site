@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  getAlbumForEditing,
   updateExistingAlbum,
   deletePhotoFromR2,
   getDirectUploadUrl,
@@ -15,11 +14,20 @@ import { Star, Trash2, ArrowLeft, Loader2, Upload, Save, CheckCircle2 } from "lu
 export default function EditAlbumPage() {
   const params = useParams();
   const router = useRouter();
-  const albumId = params?.id as string;
+
+  const rawId = params?.id;
+  const albumId = Array.isArray(rawId) ? rawId[0] : (rawId as string) || "";
 
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [title, setTitle] = useState("");
   const [date, setDate] = useState("");
+  const [category, setCategory] = useState("School Sports");
+  const [availableCategories, setAvailableCategories] = useState<string[]>([
+    "School Sports",
+    "Travel Teams",
+    "Other Activities",
+  ]);
   const [existingPhotos, setExistingPhotos] = useState<any[]>([]);
   const [newPhotos, setNewPhotos] = useState<ProcessedPhoto[]>([]);
   const [coverUrl, setCoverUrl] = useState("");
@@ -29,24 +37,46 @@ export default function EditAlbumPage() {
   const [saveSuccess, setSaveSuccess] = useState(false);
 
   useEffect(() => {
-    async function loadAlbum() {
+    if (!albumId) return;
+
+    async function loadData() {
+      setLoading(true);
+      setLoadError("");
+      const baseUrl = process.env.NEXT_PUBLIC_R2_BASE_URL?.replace(/\/$/, "");
+
       try {
-        const data = await getAlbumForEditing(albumId);
-        if (data) {
-          setTitle(data.title || "");
-          setDate(data.date || "");
-          setExistingPhotos(data.photos || []);
-          setCoverUrl(data.photos?.[0]?.urls?.thumb || "");
+        const [albumRes, configRes] = await Promise.all([
+          fetch(`${baseUrl}/${decodeURIComponent(albumId)}/manifest.json`, { cache: "no-store" }),
+          fetch(`${baseUrl}/site_config.json`, { cache: "no-store" }),
+        ]);
+
+        if (!albumRes.ok) {
+          throw new Error(`Failed to load album (HTTP ${albumRes.status})`);
         }
-      } catch {
-        alert("Could not load album or unauthorized.");
-        router.push("/admin");
+
+        const albumData = await albumRes.json();
+        setTitle(albumData.title || "");
+        setDate(albumData.date || "");
+        setCategory(albumData.category || "School Sports");
+        setExistingPhotos(albumData.photos || []);
+        setCoverUrl(albumData.cover_url || albumData.photos?.[0]?.urls?.thumb || "");
+
+        if (configRes.ok) {
+          const configData = await configRes.json();
+          if (Array.isArray(configData.categories) && configData.categories.length > 0) {
+            setAvailableCategories(configData.categories);
+          }
+        }
+      } catch (err: any) {
+        console.error("Error loading album:", err);
+        setLoadError(err.message || "Failed to load album manifest.");
       } finally {
         setLoading(false);
       }
     }
-    if (albumId) loadAlbum();
-  }, [albumId, router]);
+
+    loadData();
+  }, [albumId]);
 
   const handleNewFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -135,6 +165,7 @@ export default function EditAlbumPage() {
         album_id: albumId,
         title,
         date,
+        category,
         photos: finalPhotosList,
         cover_url: finalCoverUrl,
       });
@@ -150,8 +181,20 @@ export default function EditAlbumPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-white gap-2">
-        <Loader2 className="animate-spin text-blue-500" /> Loading album details...
+      <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center text-white gap-3">
+        <Loader2 size={32} className="animate-spin text-blue-500" />
+        <p className="text-sm text-neutral-400">Loading album details...</p>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center p-4 text-center space-y-4">
+        <p className="text-red-400 text-sm font-semibold">{loadError}</p>
+        <Link href="/admin" className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-white rounded-lg text-xs">
+          Back to Admin Studio
+        </Link>
       </div>
     );
   }
@@ -161,7 +204,7 @@ export default function EditAlbumPage() {
       <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center p-4 text-center space-y-4">
         <CheckCircle2 size={48} className="text-emerald-500" />
         <h1 className="text-2xl font-bold text-white">Album Updated!</h1>
-        <p className="text-neutral-400 text-sm">Your changes are live.</p>
+        <p className="text-neutral-400 text-sm">Category and album details saved successfully.</p>
         <div className="flex gap-4">
           <Link href="/admin" className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-white rounded-lg text-sm">
             Back to Admin
@@ -186,7 +229,7 @@ export default function EditAlbumPage() {
         </Link>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="space-y-1.5">
           <label className="text-xs font-semibold text-neutral-300">Album Title</label>
           <input
@@ -195,6 +238,20 @@ export default function EditAlbumPage() {
             onChange={(e) => setTitle(e.target.value)}
             className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-white text-sm focus:outline-none focus:border-neutral-600"
           />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-neutral-300">Category / Parent Folder</label>
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-white text-sm focus:outline-none focus:border-neutral-600"
+          >
+            {availableCategories.map((cat) => (
+              <option key={cat} value={cat}>
+                {cat}
+              </option>
+            ))}
+          </select>
         </div>
         <div className="space-y-1.5">
           <label className="text-xs font-semibold text-neutral-300">Event Date</label>
@@ -297,7 +354,7 @@ export default function EditAlbumPage() {
           <button
             onClick={handleSave}
             disabled={isSaving}
-            className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-sm font-semibold transition"
+            className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-sm font-semibold transition cursor-pointer"
           >
             <Save size={15} />
             {isSaving ? "Saving..." : "Save Changes"}
