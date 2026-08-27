@@ -1,146 +1,258 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useEffect, useState, useRef } from "react";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
+  ArrowLeft,
+  Trash2,
+  Star,
+  Plus,
+  Loader2,
+  Save,
+  AlertCircle,
+  Image as ImageIcon,
+} from "lucide-react";
+import {
+  getDirectUploadUrl,
   updateExistingAlbum,
   deletePhotoFromR2,
-  getDirectUploadUrl,
 } from "@/app/admin/actions";
-import { processImageInBrowser, ProcessedPhoto } from "@/lib/clientImageProcessor";
-import { Star, Trash2, ArrowLeft, Loader2, Upload, Save, CheckCircle2 } from "lucide-react";
+
+interface Photo {
+  id: string;
+  original_filename: string;
+  width: number;
+  height: number;
+  aspect_ratio: number;
+  urls: {
+    thumb: string;
+    display: string;
+    original: string;
+  };
+  metadata?: any;
+}
+
+interface AlbumData {
+  album_id: string;
+  title: string;
+  date: string;
+  category?: string;
+  cover_url: string;
+  photos: Photo[];
+}
+
+interface ProcessedFile {
+  uid: string;
+  file: File;
+  thumbBlob: Blob;
+  displayBlob: Blob;
+  width: number;
+  height: number;
+  aspectRatio: number;
+  previewUrl: string;
+  originalName: string;
+  metadata: any;
+}
 
 export default function EditAlbumView() {
   const params = useParams();
+  const router = useRouter();
   const rawId = params?.id;
   const albumId = Array.isArray(rawId) ? rawId[0] : (rawId as string) || "";
 
+  const [album, setAlbum] = useState<AlbumData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState("");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [uploadProgressText, setUploadProgressText] = useState("");
+
   const [title, setTitle] = useState("");
   const [date, setDate] = useState("");
   const [category, setCategory] = useState("School Sports");
-  const [availableCategories, setAvailableCategories] = useState<string[]>([
-    "School Sports",
-    "Travel Teams",
-    "Other Activities",
-  ]);
-  const [existingPhotos, setExistingPhotos] = useState<any[]>([]);
-  const [newPhotos, setNewPhotos] = useState<ProcessedPhoto[]>([]);
   const [coverUrl, setCoverUrl] = useState("");
-  const [deletedPhotoKeys, setDeletedPhotoKeys] = useState<string[]>([]);
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveStatus, setSaveStatus] = useState("");
-  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [photos, setPhotos] = useState<Photo[]>([]);
+  const [newPhotos, setNewPhotos] = useState<ProcessedFile[]>([]);
+  const [photosToDelete, setPhotosToDelete] = useState<Photo[]>([]);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!albumId) return;
 
-    async function loadData() {
+    async function loadAlbum() {
       setLoading(true);
-      setLoadError("");
+      setErrorMessage(null);
+
       const baseUrl = process.env.NEXT_PUBLIC_R2_BASE_URL?.replace(/\/$/, "");
+      if (!baseUrl) {
+        setErrorMessage("NEXT_PUBLIC_R2_BASE_URL is not defined.");
+        setLoading(false);
+        return;
+      }
 
       try {
-        const [albumRes, configRes] = await Promise.all([
-          fetch(`${baseUrl}/${decodeURIComponent(albumId)}/manifest.json`, { cache: "no-store" }),
-          fetch(`${baseUrl}/site_config.json`, { cache: "no-store" }),
-        ]);
+        const res = await fetch(`${baseUrl}/${decodeURIComponent(albumId)}/manifest.json`, {
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}: Album not found.`);
+        const data: AlbumData = await res.json();
 
-        if (!albumRes.ok) {
-          throw new Error(`Failed to load album (HTTP ${albumRes.status})`);
-        }
-
-        const albumData = await albumRes.json();
-        setTitle(albumData.title || "");
-        setDate(albumData.date || "");
-        setCategory(albumData.category || "School Sports");
-        setExistingPhotos(albumData.photos || []);
-        setCoverUrl(albumData.cover_url || albumData.photos?.[0]?.urls?.thumb || "");
-
-        if (configRes.ok) {
-          const configData = await configRes.json();
-          if (Array.isArray(configData.categories) && configData.categories.length > 0) {
-            setAvailableCategories(configData.categories);
-          }
-        }
+        setAlbum(data);
+        setTitle(data.title || "");
+        setDate(data.date || "");
+        setCategory(data.category || "School Sports");
+        setCoverUrl(data.cover_url || data.photos?.[0]?.urls?.thumb || "");
+        setPhotos(data.photos || []);
       } catch (err: any) {
-        console.error("Error loading album:", err);
-        setLoadError(err.message || "Failed to load album manifest.");
+        setErrorMessage(err.message || "Failed to load album.");
       } finally {
         setLoading(false);
       }
     }
 
-    loadData();
+    loadAlbum();
   }, [albumId]);
 
-  const handleNewFiles = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    setSaveStatus("Reading new photos...");
-    const processed: ProcessedPhoto[] = [];
-    for (let i = 0; i < files.length; i++) {
-      if (files[i].type.startsWith("image/")) {
-        const item = await processImageInBrowser(files[i]);
-        processed.push(item);
-      }
+  const processImage = async (file: File): Promise<ProcessedFile> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      const objectUrl = URL.createObjectURL(file);
+
+      img.onload = () => {
+        const width = img.naturalWidth;
+        const height = img.naturalHeight;
+        const aspectRatio = Number((width / height).toFixed(4));
+
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+
+        // Display version: max 2000px
+        const maxDisplay = 2000;
+        let dWidth = width;
+        let dHeight = height;
+        if (dWidth > maxDisplay || dHeight > maxDisplay) {
+          if (dWidth > dHeight) {
+            dHeight = Math.round((dHeight * maxDisplay) / dWidth);
+            dWidth = maxDisplay;
+          } else {
+            dWidth = Math.round((dWidth * maxDisplay) / dHeight);
+            dHeight = maxDisplay;
+          }
+        }
+        canvas.width = dWidth;
+        canvas.height = dHeight;
+        ctx?.drawImage(img, 0, 0, dWidth, dHeight);
+
+        canvas.toBlob(
+          (displayBlob) => {
+            // Thumb version: max 600px
+            const maxThumb = 600;
+            let tWidth = width;
+            let tHeight = height;
+            if (tWidth > maxThumb || tHeight > maxThumb) {
+              if (tWidth > tHeight) {
+                tHeight = Math.round((tHeight * maxThumb) / tWidth);
+                tWidth = maxThumb;
+              } else {
+                tWidth = Math.round((tWidth * maxThumb) / tHeight);
+                tHeight = maxThumb;
+              }
+            }
+            canvas.width = tWidth;
+            canvas.height = tHeight;
+            ctx?.drawImage(img, 0, 0, tWidth, tHeight);
+
+            canvas.toBlob(
+              (thumbBlob) => {
+                resolve({
+                  uid: Math.random().toString(36).substring(2, 9),
+                  file,
+                  thumbBlob: thumbBlob!,
+                  displayBlob: displayBlob!,
+                  width,
+                  height,
+                  aspectRatio,
+                  previewUrl: objectUrl,
+                  originalName: file.name,
+                  metadata: {},
+                });
+              },
+              "image/webp",
+              0.8
+            );
+          },
+          "image/webp",
+          0.85
+        );
+      };
+
+      img.src = objectUrl;
+    });
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files) return;
+    const files = Array.from(e.target.files);
+    const processed: ProcessedFile[] = [];
+
+    for (const f of files) {
+      const p = await processImage(f);
+      processed.push(p);
     }
+
     setNewPhotos((prev) => [...prev, ...processed]);
-    setSaveStatus("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const removeExistingPhoto = (photo: any) => {
-    const baseUrl = process.env.NEXT_PUBLIC_R2_BASE_URL?.replace(/\/$/, "") || "";
-    const thumbKey = photo.urls.thumb.replace(`${baseUrl}/`, "");
-    const displayKey = photo.urls.display.replace(`${baseUrl}/`, "");
-    const origKey = photo.urls.original.replace(`${baseUrl}/`, "");
-
-    setDeletedPhotoKeys((prev) => [...prev, thumbKey, displayKey, origKey]);
-    const updated = existingPhotos.filter((p) => p.id !== photo.id);
-    setExistingPhotos(updated);
-
-    if (coverUrl === photo.urls.thumb && updated.length > 0) {
-      setCoverUrl(updated[0].urls.thumb);
+  const handleMarkPhotoForDeletion = (photo: Photo) => {
+    setPhotos((prev) => prev.filter((p) => p.id !== photo.id));
+    setPhotosToDelete((prev) => [...prev, photo]);
+    if (coverUrl === photo.urls.thumb) {
+      const remaining = photos.filter((p) => p.id !== photo.id);
+      setCoverUrl(remaining[0]?.urls?.thumb || "");
     }
   };
 
-  const handleSave = async () => {
-    if (!title.trim()) return alert("Album Title cannot be empty.");
+  const handleSaveAllChanges = async () => {
+    if (!album) return;
     setIsSaving(true);
+
     const baseUrl = process.env.NEXT_PUBLIC_R2_BASE_URL?.replace(/\/$/, "");
 
     try {
-      if (deletedPhotoKeys.length > 0) {
-        setSaveStatus("Removing deleted photos from storage...");
-        await deletePhotoFromR2(deletedPhotoKeys);
-      }
+      // 1. Upload newly added photos if any exist
+      const newlyUploadedPhotosData: Photo[] = [];
+      const currentCount = photos.length;
 
-      const newlyUploadedList: any[] = [];
       for (let i = 0; i < newPhotos.length; i++) {
         const p = newPhotos[i];
-        const nextIndex = existingPhotos.length + i + 1;
-        const photoId = `${albumId}_${String(nextIndex).padStart(3, "0")}`;
-        setSaveStatus(`Uploading new photo ${i + 1} of ${newPhotos.length}...`);
+        const photoIndex = currentCount + i + 1;
+        const photoId = `${album.album_id}_${String(photoIndex).padStart(3, "0")}`;
+        setUploadProgressText(`Uploading new photo ${i + 1} of ${newPhotos.length}...`);
 
-        const thumbKey = `${albumId}/thumb/${photoId}.webp`;
-        const displayKey = `${albumId}/display/${photoId}.webp`;
+        const thumbKey = `${album.album_id}/thumb/${photoId}.webp`;
+        const displayKey = `${album.album_id}/display/${photoId}.webp`;
         const origExt = p.originalName.substring(p.originalName.lastIndexOf("."));
-        const origKey = `${albumId}/original/${photoId}${origExt}`;
+        const origKey = `${album.album_id}/original/${photoId}${origExt}`;
 
-        const [thumbUrl, displayUrl, origUrl] = await Promise.all([
+        const [thumbRes, displayRes, origRes] = await Promise.all([
           getDirectUploadUrl(thumbKey, "image/webp"),
           getDirectUploadUrl(displayKey, "image/webp"),
-          getDirectUploadUrl(origKey, p.file.type),
+          getDirectUploadUrl(origKey, p.file.type || "image/jpeg"),
         ]);
+
+        if (!thumbRes.success || !thumbRes.url) throw new Error(thumbRes.error || "Failed to get thumb upload URL");
+        if (!displayRes.success || !displayRes.url) throw new Error(displayRes.error || "Failed to get display upload URL");
+        if (!origRes.success || !origRes.url) throw new Error(origRes.error || "Failed to get original upload URL");
 
         await Promise.all([
-          fetch(thumbUrl, { method: "PUT", body: p.thumbBlob, headers: { "Content-Type": "image/webp" } }),
-          fetch(displayUrl, { method: "PUT", body: p.displayBlob, headers: { "Content-Type": "image/webp" } }),
-          fetch(origUrl, { method: "PUT", body: p.file, headers: { "Content-Type": p.file.type } }),
+          fetch(thumbRes.url, { method: "PUT", body: p.thumbBlob, headers: { "Content-Type": "image/webp" } }),
+          fetch(displayRes.url, { method: "PUT", body: p.displayBlob, headers: { "Content-Type": "image/webp" } }),
+          fetch(origRes.url, { method: "PUT", body: p.file, headers: { "Content-Type": p.file.type || "image/jpeg" } }),
         ]);
 
-        newlyUploadedList.push({
+        newlyUploadedPhotosData.push({
           id: photoId,
           original_filename: p.originalName,
           width: p.width,
@@ -155,25 +267,44 @@ export default function EditAlbumView() {
         });
       }
 
-      setSaveStatus("Saving changes...");
-      const finalPhotosList = [...existingPhotos, ...newlyUploadedList];
-      const finalCoverUrl = coverUrl || finalPhotosList[0]?.urls?.thumb || "";
+      // 2. Delete queued photos from R2 storage
+      if (photosToDelete.length > 0) {
+        setUploadProgressText("Cleaning up deleted photos from storage...");
+        const keysToDelete: string[] = [];
+        for (const p of photosToDelete) {
+          const thumbKey = p.urls.thumb.replace(`${baseUrl}/`, "");
+          const displayKey = p.urls.display.replace(`${baseUrl}/`, "");
+          const origKey = p.urls.original.replace(`${baseUrl}/`, "");
+          keysToDelete.push(thumbKey, displayKey, origKey);
+        }
+        await deletePhotoFromR2(keysToDelete);
+      }
 
-      await updateExistingAlbum({
-        album_id: albumId,
+      setUploadProgressText("Saving updated album manifest...");
+
+      const allPhotos = [...photos, ...newlyUploadedPhotosData];
+      const finalCoverUrl = coverUrl || allPhotos[0]?.urls?.thumb || "";
+
+      const updatedAlbum: AlbumData = {
+        album_id: album.album_id,
         title,
         date,
         category,
-        photos: finalPhotosList,
         cover_url: finalCoverUrl,
-      });
+        photos: allPhotos,
+      };
 
-      setSaveSuccess(true);
+      const res = await updateExistingAlbum(updatedAlbum);
+      if (!res.success) throw new Error(res.error || "Failed to update album metadata");
+
+      alert("Album successfully updated!");
+      router.push("/admin");
     } catch (err: any) {
-      alert(`Save failed: ${err.message}`);
+      const msg = typeof err === "string" ? err : err?.message || JSON.stringify(err);
+      alert(`Save failed: ${msg}`);
     } finally {
       setIsSaving(false);
-      setSaveStatus("");
+      setUploadProgressText("");
     }
   };
 
@@ -181,184 +312,162 @@ export default function EditAlbumView() {
     return (
       <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center text-white gap-3">
         <Loader2 size={32} className="animate-spin text-blue-500" />
-        <p className="text-sm text-neutral-400">Loading album details...</p>
+        <p className="text-sm text-neutral-400">Loading album editor...</p>
       </div>
     );
   }
 
-  if (loadError) {
+  if (errorMessage || !album) {
     return (
-      <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center p-4 text-center space-y-4">
-        <p className="text-red-400 text-sm font-semibold">{loadError}</p>
-        <Link href="/admin" className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-white rounded-lg text-xs">
-          Back to Admin Studio
+      <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center p-6 text-center space-y-4 text-white max-w-lg mx-auto">
+        <AlertCircle size={40} className="text-red-400 mx-auto" />
+        <h2 className="text-lg font-bold">Unable to Load Album</h2>
+        <p className="text-neutral-400 text-xs font-mono bg-neutral-900 border border-neutral-800 p-3 rounded-lg text-left break-all">
+          {errorMessage || "Album manifest not found."}
+        </p>
+        <Link href="/admin" className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-white rounded-lg text-xs font-semibold">
+          Return to Admin Studio
         </Link>
-      </div>
-    );
-  }
-
-  if (saveSuccess) {
-    return (
-      <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center p-4 text-center space-y-4">
-        <CheckCircle2 size={48} className="text-emerald-500" />
-        <h1 className="text-2xl font-bold text-white">Album Updated!</h1>
-        <p className="text-neutral-400 text-sm">Category and album details saved successfully.</p>
-        <div className="flex gap-4">
-          <Link href="/admin" className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-white rounded-lg text-sm">
-            Back to Admin
-          </Link>
-          <Link href={`/album/${albumId}`} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-semibold">
-            View Live Album
-          </Link>
-        </div>
       </div>
     );
   }
 
   return (
-    <main className="min-h-screen bg-neutral-950 text-neutral-100 p-6 md:p-12 max-w-6xl mx-auto space-y-8">
-      <div className="flex items-center justify-between border-b border-neutral-800 pb-4">
+    <div className="min-h-screen bg-neutral-950 text-neutral-100 pb-28">
+      {/* Sticky Header with Save Button */}
+      <header className="sticky top-0 z-40 bg-neutral-950/80 backdrop-blur-md border-b border-neutral-800 px-6 py-4">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
+          <Link href="/admin" className="inline-flex items-center gap-2 text-xs font-semibold text-neutral-400 hover:text-white transition">
+            <ArrowLeft size={14} /> Back to Studio
+          </Link>
+          <div className="flex items-center gap-3">
+            {uploadProgressText && (
+              <span className="text-xs text-blue-400 animate-pulse">{uploadProgressText}</span>
+            )}
+            <button
+              onClick={handleSaveAllChanges}
+              disabled={isSaving}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold rounded-lg shadow-lg shadow-blue-900/30 transition"
+            >
+              {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+              {isSaving ? "Saving..." : "Save Changes"}
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-6xl mx-auto px-6 pt-8 space-y-8">
         <div>
           <h1 className="text-2xl font-bold text-white">Edit Album</h1>
-          <p className="text-xs text-neutral-400">ID: {albumId}</p>
+          <p className="text-xs font-mono text-neutral-500 mt-1">ID: {album.album_id}</p>
         </div>
-        <Link href="/admin" className="text-xs text-neutral-400 hover:text-white flex items-center gap-1">
-          <ArrowLeft size={14} /> Back to Studio
-        </Link>
-      </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="space-y-1.5">
-          <label className="text-xs font-semibold text-neutral-300">Album Title</label>
+        {/* Album Metadata Inputs */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-neutral-900/40 p-5 rounded-xl border border-neutral-800/80">
+          <div className="space-y-1.5 md:col-span-2">
+            <label className="text-xs font-medium text-neutral-400">Album Title</label>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-neutral-400">Event Date</label>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+            />
+          </div>
+        </div>
+
+        {/* Add More Photos Drop Area */}
+        <div
+          onClick={() => fileInputRef.current?.click()}
+          className="border-2 border-dashed border-neutral-800 hover:border-neutral-700 bg-neutral-900/20 hover:bg-neutral-900/40 rounded-xl p-8 text-center cursor-pointer transition flex flex-col items-center justify-center gap-2"
+        >
           <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-white text-sm focus:outline-none focus:border-neutral-600"
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept="image/*"
+            onChange={handleFileSelect}
+            className="hidden"
           />
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-xs font-semibold text-neutral-300">Category / Parent Folder</label>
-          <select
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-white text-sm focus:outline-none focus:border-neutral-600"
-          >
-            {availableCategories.map((cat) => (
-              <option key={cat} value={cat}>
-                {cat}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-xs font-semibold text-neutral-300">Event Date</label>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-white text-sm focus:outline-none focus:border-neutral-600"
-          />
-        </div>
-      </div>
-
-      <div
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => {
-          e.preventDefault();
-          handleNewFiles(e.dataTransfer.files);
-        }}
-        className="border-2 border-dashed border-neutral-800 hover:border-neutral-700 bg-neutral-900/40 rounded-xl p-6 text-center transition flex flex-col items-center justify-center gap-2 cursor-pointer"
-        onClick={() => document.getElementById("add-photos-input")?.click()}
-      >
-        <Upload size={24} className="text-neutral-500" />
-        <p className="text-xs font-semibold text-neutral-300">Add more photos to this album</p>
-        <input
-          id="add-photos-input"
-          type="file"
-          multiple
-          accept="image/jpeg,image/png"
-          className="hidden"
-          onChange={(e) => handleNewFiles(e.target.files)}
-        />
-      </div>
-
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-bold text-neutral-300">
-            Photos ({existingPhotos.length + newPhotos.length})
-          </h2>
-          <span className="text-xs text-neutral-500">Gold star marks the current cover</span>
+          <Plus size={24} className="text-neutral-500" />
+          <p className="text-sm font-medium text-neutral-300">Add more photos to this album</p>
+          <p className="text-xs text-neutral-500">Click or drag images here to queue for upload</p>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-          {existingPhotos.map((photo) => {
-            const isCover = coverUrl === photo.urls.thumb;
-            return (
-              <div
-                key={photo.id}
-                className={`group relative rounded-xl overflow-hidden border ${
-                  isCover ? "border-amber-500 ring-2 ring-amber-500/40" : "border-neutral-800"
-                } bg-neutral-900 aspect-4/3`}
-              >
-                <img src={photo.urls.thumb} alt={photo.original_filename} className="w-full h-full object-cover" />
-                <button
-                  type="button"
-                  onClick={() => setCoverUrl(photo.urls.thumb)}
-                  className={`absolute top-2 left-2 p-1.5 rounded-lg backdrop-blur-md transition ${
-                    isCover ? "bg-amber-500 text-black" : "bg-black/60 text-neutral-400 hover:text-white"
-                  }`}
-                  title="Set as Cover"
-                >
-                  <Star size={13} fill={isCover ? "currentColor" : "none"} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => removeExistingPhoto(photo)}
-                  className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/60 text-neutral-400 hover:text-red-400 backdrop-blur-md opacity-0 group-hover:opacity-100 transition"
-                  title="Delete from Album"
-                >
-                  <Trash2 size={13} />
-                </button>
-              </div>
-            );
-          })}
-
-          {newPhotos.map((p) => (
-            <div key={p.uid} className="relative rounded-xl overflow-hidden border border-blue-500/50 bg-neutral-900 aspect-4/3">
-              <img src={p.previewUrl} alt={p.originalName} className="w-full h-full object-cover" />
-              <div className="absolute bottom-2 left-2 px-1.5 py-0.5 rounded bg-blue-600/90 text-[10px] font-semibold text-white backdrop-blur-sm">
-                New
-              </div>
-              <button
-                type="button"
-                onClick={() => setNewPhotos(newPhotos.filter((x) => x.uid !== p.uid))}
-                className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/60 text-neutral-400 hover:text-red-400 backdrop-blur-md transition"
-                title="Cancel Add"
-              >
-                <Trash2 size={13} />
-              </button>
+        {/* New Unsaved Photos */}
+        {newPhotos.length > 0 && (
+          <div className="space-y-3">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-blue-400">
+              New Photos Queued ({newPhotos.length})
+            </h3>
+            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3">
+              {newPhotos.map((p, idx) => (
+                <div key={p.uid} className="relative aspect-square rounded-lg overflow-hidden border border-blue-500/40 group">
+                  <img src={p.previewUrl} alt="" className="w-full h-full object-cover" />
+                  <button
+                    onClick={() => setNewPhotos((prev) => prev.filter((_, i) => i !== idx))}
+                    className="absolute top-1.5 right-1.5 p-1 bg-red-600/80 hover:bg-red-600 text-white rounded-md transition"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          </div>
+        )}
 
-        <div className="pt-6 flex items-center justify-end gap-4 border-t border-neutral-800">
-          {saveStatus && (
-            <span className="text-xs text-neutral-400 flex items-center gap-2">
-              <Loader2 size={14} className="animate-spin text-blue-500" />
-              {saveStatus}
-            </span>
-          )}
-          <button
-            onClick={handleSave}
-            disabled={isSaving}
-            className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-sm font-semibold transition cursor-pointer"
-          >
-            <Save size={15} />
-            {isSaving ? "Saving..." : "Save Changes"}
-          </button>
+        {/* Existing Photos Grid */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400">
+              Existing Photos ({photos.length})
+            </h3>
+            <span className="text-[11px] text-neutral-500">Click the star to set cover photo</span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3">
+            {photos.map((photo) => {
+              const isCover = coverUrl === photo.urls.thumb;
+              return (
+                <div
+                  key={photo.id}
+                  className={`group relative aspect-square rounded-lg overflow-hidden bg-neutral-900 border transition ${
+                    isCover ? "border-amber-500 ring-2 ring-amber-500/30" : "border-neutral-800 hover:border-neutral-700"
+                  }`}
+                >
+                  <img src={photo.urls.thumb} alt="" className="w-full h-full object-cover" />
+                  <div className="absolute top-1.5 right-1.5 flex gap-1">
+                    <button
+                      onClick={() => setCoverUrl(photo.urls.thumb)}
+                      className={`p-1.5 rounded-md backdrop-blur-md transition ${
+                        isCover ? "bg-amber-500 text-black" : "bg-black/60 text-neutral-400 hover:text-white"
+                      }`}
+                      title="Set as cover"
+                    >
+                      <Star size={12} fill={isCover ? "currentColor" : "none"} />
+                    </button>
+                    <button
+                      onClick={() => handleMarkPhotoForDeletion(photo)}
+                      className="p-1.5 rounded-md bg-black/60 text-neutral-400 hover:text-red-400 backdrop-blur-md transition"
+                      title="Delete photo"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }
