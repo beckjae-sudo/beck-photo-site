@@ -149,16 +149,20 @@ export default function AdminStudioView() {
         const origExt = p.originalName.substring(p.originalName.lastIndexOf("."));
         const origKey = `${albumId}/original/${photoId}${origExt}`;
 
-        const [thumbUrl, displayUrl, origUrl] = await Promise.all([
+        const [thumbRes, displayRes, origRes] = await Promise.all([
           getDirectUploadUrl(thumbKey, "image/webp"),
           getDirectUploadUrl(displayKey, "image/webp"),
-          getDirectUploadUrl(origKey, p.file.type),
+          getDirectUploadUrl(origKey, p.file.type || "image/jpeg"),
         ]);
 
+        if (!thumbRes.success || !thumbRes.url) throw new Error(thumbRes.error || "Failed to get thumb upload URL");
+        if (!displayRes.success || !displayRes.url) throw new Error(displayRes.error || "Failed to get display upload URL");
+        if (!origRes.success || !origRes.url) throw new Error(origRes.error || "Failed to get original upload URL");
+
         await Promise.all([
-          fetch(thumbUrl, { method: "PUT", body: p.thumbBlob, headers: { "Content-Type": "image/webp" } }),
-          fetch(displayUrl, { method: "PUT", body: p.displayBlob, headers: { "Content-Type": "image/webp" } }),
-          fetch(origUrl, { method: "PUT", body: p.file, headers: { "Content-Type": p.file.type } }),
+          fetch(thumbRes.url, { method: "PUT", body: p.thumbBlob, headers: { "Content-Type": "image/webp" } }),
+          fetch(displayRes.url, { method: "PUT", body: p.displayBlob, headers: { "Content-Type": "image/webp" } }),
+          fetch(origRes.url, { method: "PUT", body: p.file, headers: { "Content-Type": p.file.type || "image/jpeg" } }),
         ]);
 
         uploadedPhotosData.push({
@@ -182,7 +186,7 @@ export default function AdminStudioView() {
       const coverIndex = selectedCover ? photos.indexOf(selectedCover) : 0;
       const finalCoverUrl = uploadedPhotosData[coverIndex]?.urls?.thumb || uploadedPhotosData[0]?.urls?.thumb;
 
-      await createAlbum({
+      const createRes = await createAlbum({
         album_id: albumId,
         title,
         date: date || new Date().toISOString().split("T")[0],
@@ -190,6 +194,10 @@ export default function AdminStudioView() {
         photos: uploadedPhotosData,
         cover_url: finalCoverUrl,
       });
+
+      if (!createRes.success) {
+        throw new Error(createRes.error || "Failed to save album metadata.");
+      }
 
       setTitle("");
       setDate("");
@@ -204,7 +212,7 @@ export default function AdminStudioView() {
       setIsUploading(false);
       setUploadProgressText("");
     }
-  };;
+  };
 
   const handleSaveSettings = async () => {
     setSavingSettings(true);
