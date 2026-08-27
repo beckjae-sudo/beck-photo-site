@@ -198,12 +198,13 @@ export default function AdminStudioView() {
       alert("Album successfully created and published!");
       loadData();
     } catch (err: any) {
-      alert(`Upload failed: ${err.message}`);
+      const msg = typeof err === "string" ? err : err?.message || JSON.stringify(err);
+      alert(`Upload failed: ${msg}`);
     } finally {
       setIsUploading(false);
       setUploadProgressText("");
     }
-  };
+  };;
 
   const handleSaveSettings = async () => {
     setSavingSettings(true);

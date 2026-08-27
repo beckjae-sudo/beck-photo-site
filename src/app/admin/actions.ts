@@ -4,15 +4,25 @@ import { S3Client, PutObjectCommand, DeleteObjectsCommand } from "@aws-sdk/clien
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { cookies } from "next/headers";
 
-const r2 = new S3Client({
-  region: "auto",
-  endpoint: process.env.R2_ENDPOINT,
-  credentials: {
-    accessKeyId: process.env.R2_ACCESS_KEY_ID || "",
-    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || "",
-  },
-  forcePathStyle: true,
-})
+function getR2Client() {
+  const endpoint = process.env.R2_ENDPOINT?.trim();
+  const accessKeyId = process.env.R2_ACCESS_KEY_ID?.trim();
+  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY?.trim();
+
+  if (!endpoint || !accessKeyId || !secretAccessKey) {
+    throw new Error("Cloudflare R2 environment variables are missing or incomplete.");
+  }
+
+  return new S3Client({
+    region: "auto",
+    endpoint: endpoint,
+    credentials: {
+      accessKeyId: accessKeyId,
+      secretAccessKey: secretAccessKey,
+    },
+    forcePathStyle: true,
+  });
+}
 
 const BUCKET_NAME = process.env.R2_BUCKET_NAME || "";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
@@ -29,7 +39,7 @@ export async function loginAdmin(password: string): Promise<{ success: boolean }
     cookieStore.set("admin_session", "authenticated", {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      maxAge: 60 * 60 * 24 * 7, // 1 week
+      maxAge: 60 * 60 * 24 * 7,
       path: "/",
     });
     return { success: true };
@@ -41,6 +51,7 @@ export async function getDirectUploadUrl(key: string, contentType: string): Prom
   const isAuth = await checkAdminAuth();
   if (!isAuth) throw new Error("Unauthorized");
 
+  const r2 = getR2Client();
   const command = new PutObjectCommand({
     Bucket: BUCKET_NAME,
     Key: key,
@@ -61,6 +72,8 @@ export async function createAlbum(albumData: {
   const isAuth = await checkAdminAuth();
   if (!isAuth) throw new Error("Unauthorized");
 
+  const r2 = getR2Client();
+
   // 1. Write album manifest.json
   await r2.send(
     new PutObjectCommand({
@@ -80,7 +93,7 @@ export async function createAlbum(albumData: {
       albums = await res.json();
     }
   } catch (e) {
-    console.warn("No existing albums.json found, creating fresh array.");
+    console.warn("No existing albums.json found, starting fresh.");
   }
 
   const newSummary = {
@@ -117,7 +130,8 @@ export async function updateExistingAlbum(albumData: {
   const isAuth = await checkAdminAuth();
   if (!isAuth) throw new Error("Unauthorized");
 
-  // 1. Overwrite manifest.json
+  const r2 = getR2Client();
+
   await r2.send(
     new PutObjectCommand({
       Bucket: BUCKET_NAME,
@@ -127,7 +141,6 @@ export async function updateExistingAlbum(albumData: {
     })
   );
 
-  // 2. Update albums.json
   const baseUrl = process.env.NEXT_PUBLIC_R2_BASE_URL?.replace(/\/$/, "");
   let albums: any[] = [];
   try {
@@ -171,6 +184,7 @@ export async function deletePhotoFromR2(keys: string[]) {
 
   if (keys.length === 0) return { success: true };
 
+  const r2 = getR2Client();
   await r2.send(
     new DeleteObjectsCommand({
       Bucket: BUCKET_NAME,
@@ -188,6 +202,7 @@ export async function saveSiteConfig(config: any) {
   const isAuth = await checkAdminAuth();
   if (!isAuth) throw new Error("Unauthorized");
 
+  const r2 = getR2Client();
   await r2.send(
     new PutObjectCommand({
       Bucket: BUCKET_NAME,
