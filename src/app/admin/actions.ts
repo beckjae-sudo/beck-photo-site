@@ -11,11 +11,17 @@ function getR2Client() {
 
   if (!endpoint || !accessKeyId || !secretAccessKey) {
     throw new Error(
-      `Missing Cloudflare R2 Environment Variables on Vercel. ` +
-      `endpoint: ${endpoint ? "OK" : "MISSING"}, ` +
-      `accessKeyId: ${accessKeyId ? "OK" : "MISSING"}, ` +
-      `secretAccessKey: ${secretAccessKey ? "OK" : "MISSING"}`
+      `Missing env variables: endpoint=${endpoint ? "SET" : "MISSING"}, accessKeyId=${
+        accessKeyId ? "SET" : "MISSING"
+      }, secretKey=${secretAccessKey ? "SET" : "MISSING"}`
     );
+  }
+
+  // Validate endpoint format explicitly
+  try {
+    new URL(endpoint);
+  } catch {
+    throw new Error(`R2_ENDPOINT is not a valid URL: "${endpoint}"`);
   }
 
   return new S3Client({
@@ -78,9 +84,17 @@ export async function getDirectUploadUrl(
     });
 
     const url = await getSignedUrl(r2, command, { expiresIn: 3600 });
+
+    // Validate generated signed URL
+    try {
+      new URL(url);
+    } catch {
+      return { success: false, error: `Generated signed URL is invalid: "${url}"` };
+    }
+
     return { success: true, url };
   } catch (err: any) {
-    return { success: false, error: err?.message || String(err) };
+    return { success: false, error: `getDirectUploadUrl error: ${err?.message || String(err)}` };
   }
 }
 
