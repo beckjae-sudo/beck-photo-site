@@ -48,6 +48,15 @@ const themeStyles: Record<string, { bg: string; glow: string; pill: string }> = 
 const SPLASH_STORAGE_KEY = "beck_photo_splash_last_seen";
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
+// Helper to force high-res display version instead of thumbnail
+function getHighResCoverUrl(url: string): string {
+  if (!url) return "";
+  return url
+    .replace(/\/thumb\//, "/display/")
+    .replace(/_thumb\./, "_display.")
+    .replace(/thumb/g, "display");
+}
+
 export default function HomeGalleryView({
   albums = [],
   config,
@@ -59,10 +68,11 @@ export default function HomeGalleryView({
   const [currentCoverIndex, setCurrentCoverIndex] = useState(0);
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
 
-  // Filter valid covers for the background cycle
-  const coverPhotos = albums.filter((a) => Boolean(a.cover_url)).map((a) => a.cover_url);
+  // Extract and upgrade album covers to high-res display versions
+  const coverPhotos = albums
+    .filter((a) => Boolean(a.cover_url))
+    .map((a) => getHighResCoverUrl(a.cover_url));
 
-  // Check 7-day splash memory
   useEffect(() => {
     try {
       const lastSeen = localStorage.getItem(SPLASH_STORAGE_KEY);
@@ -76,13 +86,12 @@ export default function HomeGalleryView({
     }
   }, []);
 
-  // Background cover rotator
   useEffect(() => {
     if (!showSplash || coverPhotos.length <= 1) return;
 
     const interval = setInterval(() => {
       setCurrentCoverIndex((prev) => (prev + 1) % coverPhotos.length);
-    }, 6000);
+    }, 7000);
 
     return () => clearInterval(interval);
   }, [showSplash, coverPhotos.length]);
@@ -104,7 +113,6 @@ export default function HomeGalleryView({
       ? albums
       : albums.filter((album) => (album.category || "School Sports") === selectedCategory);
 
-  // Prevent layout jump before localStorage is evaluated
   if (showSplash === null) {
     return <div className="min-h-screen bg-black" />;
   }
@@ -113,15 +121,15 @@ export default function HomeGalleryView({
     <div className="relative min-h-screen bg-black text-neutral-100 overflow-x-hidden select-none">
       {/* ----------------- SPLASH SCREEN OVERLAY ----------------- */}
       {showSplash && (
-        <div className="fixed inset-0 z-50 flex flex-col items-center justify-between p-8 md:p-14 bg-black">
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-between p-8 md:p-14 bg-black overflow-hidden">
           {/* Background Rotating Images with Cross-Fade */}
           {coverPhotos.length > 0 ? (
             coverPhotos.map((url, idx) => (
               <div
                 key={url}
                 className={`absolute inset-0 transition-opacity duration-1000 ease-in-out ${
-                  idx === currentCoverIndex ? "opacity-45 scale-100" : "opacity-0 scale-105"
-                } transition-transform duration-[6000ms]`}
+                  idx === currentCoverIndex ? "opacity-60 scale-100" : "opacity-0 scale-105"
+                } transition-transform duration-[7000ms]`}
               >
                 <img
                   src={url}
@@ -131,60 +139,67 @@ export default function HomeGalleryView({
               </div>
             ))
           ) : (
-            <div className="absolute inset-0 bg-gradient-to-br from-neutral-900 via-black to-neutral-950 opacity-90" />
+            <div className="absolute inset-0 bg-gradient-to-br from-neutral-950 via-black to-neutral-900 opacity-90" />
           )}
 
           {/* Vignette & Contrast Overlays */}
-          <div className="absolute inset-0 bg-radial from-transparent via-black/50 to-black/90 pointer-events-none" />
-          <div className="absolute inset-0 bg-black/30 backdrop-blur-[1.5px] pointer-events-none" />
+          <div className="absolute inset-0 bg-radial from-transparent via-black/40 to-black/90 pointer-events-none" />
+          <div className="absolute inset-0 bg-black/25 backdrop-blur-[0.5px] pointer-events-none" />
 
-          {/* Top subtle bar */}
-          <div className="relative z-10 w-full flex justify-between items-center max-w-7xl mx-auto text-xs font-mono tracking-widest text-neutral-400 uppercase">
-            <span>ARCHIVE / VOL. 01</span>
-            <span>{albums.length} ALBUMS</span>
+          {/* Top Bar */}
+          <div className="relative z-10 w-full flex justify-between items-center max-w-7xl mx-auto text-[11px] font-mono tracking-[0.25em] text-neutral-400 uppercase">
+            <span className="flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+              ARCHIVE / VOL. 01
+            </span>
+            <span>{albums.length} GALLERIES</span>
           </div>
 
-          {/* Center Brand Identity (The Verge Inspired Typography) */}
-          <div className="relative z-10 text-center space-y-8 max-w-3xl mx-auto flex flex-col items-center">
-            <div className="space-y-2">
-              <h1 className="text-4xl sm:text-6xl md:text-7xl font-black tracking-tighter uppercase text-white font-mono flex items-center justify-center gap-1.5 drop-shadow-2xl">
-                <span>BECK</span>
-                <span className="text-blue-500 font-light">/</span>
-                <span className="tracking-normal font-extrabold text-neutral-200">PHOTO</span>
+          {/* Center Brand Identity (Verge Modular Aesthetic) */}
+          <div className="relative z-10 text-center space-y-7 max-w-3xl mx-auto flex flex-col items-center">
+            <div className="space-y-3">
+              <h1 className="text-5xl sm:text-7xl md:text-8xl font-black uppercase tracking-[-0.07em] text-white flex items-center justify-center gap-2 drop-shadow-2xl">
+                <span className="bg-clip-text text-transparent bg-gradient-to-b from-white via-neutral-100 to-neutral-300">
+                  BECK
+                </span>
+                <span className="text-blue-500 font-light tracking-normal transform -skew-x-12">
+                  /
+                </span>
+                <span className="bg-clip-text text-transparent bg-gradient-to-b from-white via-neutral-100 to-neutral-400">
+                  PHOTO
+                </span>
               </h1>
-              <p className="text-xs sm:text-sm uppercase tracking-[0.35em] text-neutral-400 font-mono">
+              <p className="text-[11px] sm:text-xs uppercase tracking-[0.45em] text-neutral-300 font-mono font-medium">
                 Action & High-Resolution Athletics
               </p>
             </div>
 
-            {/* Enter Gallery Minimalist Action Button */}
+            {/* Apple-Style Frosted Liquid Glass Button */}
             <button
               onClick={handleEnterGallery}
-              className="group flex items-center gap-3 px-8 py-3.5 rounded-full bg-white text-black hover:bg-neutral-200 text-xs font-bold tracking-wider uppercase transition-all duration-300 shadow-2xl hover:scale-105 hover:shadow-white/20 active:scale-95 cursor-pointer"
+              className="group relative flex items-center gap-3 px-8 py-3.5 rounded-full bg-white/10 hover:bg-white/20 active:bg-white/25 text-white text-xs font-semibold tracking-widest uppercase backdrop-blur-xl border border-white/25 hover:border-white/40 shadow-[0_8px_32px_0_rgba(0,0,0,0.5),inset_0_1px_1px_0_rgba(255,255,255,0.4)] transition-all duration-300 hover:scale-105 active:scale-95 cursor-pointer"
             >
               <span>Enter Gallery</span>
-              <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
+              <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform text-blue-400" />
             </button>
           </div>
 
-          {/* Bottom subtle bar */}
-          <div className="relative z-10 text-[11px] text-neutral-500 font-mono tracking-wider">
-            HIGH-RESOLUTION DOWNLOADS ENABLED
+          {/* Bottom Bar */}
+          <div className="relative z-10 text-[10px] text-neutral-400 font-mono tracking-[0.2em] uppercase">
+            Direct Cloudflare R2 Delivery
           </div>
         </div>
       )}
 
       {/* ----------------- HOME GALLERY DIRECTORY ----------------- */}
       <div className={`min-h-screen ${activeTheme.bg} relative overflow-hidden`}>
-        {/* Ambient background glow */}
         <div className={`pointer-events-none absolute inset-0 ${activeTheme.glow}`} />
 
-        {/* Gallery Header with Return-to-Splash Brand Logo */}
         <header className="border-b border-neutral-800/60 sticky top-0 z-30 bg-neutral-950/75 backdrop-blur-md">
           <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
             <button
               onClick={() => setShowSplash(true)}
-              className="font-mono font-black text-sm tracking-tighter uppercase text-white flex items-center gap-1 hover:opacity-80 transition cursor-pointer"
+              className="font-black text-sm tracking-tighter uppercase text-white flex items-center gap-1 hover:opacity-80 transition cursor-pointer"
               title="Return to Splash Screen"
             >
               <span>BECK</span>
@@ -198,7 +213,6 @@ export default function HomeGalleryView({
         </header>
 
         <main className="relative max-w-7xl mx-auto px-6 py-12 md:py-16 space-y-12">
-          {/* Hero Section */}
           <div className="space-y-4 max-w-2xl">
             {config.badge_text && (
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-neutral-900/80 border border-neutral-800 text-neutral-300">
@@ -214,7 +228,6 @@ export default function HomeGalleryView({
             </p>
           </div>
 
-          {/* Category Filter Navigation */}
           <div className="flex flex-wrap items-center gap-2 border-b border-neutral-800/80 pb-4">
             {categories.map((cat) => {
               const isActive = selectedCategory === cat;
@@ -234,7 +247,6 @@ export default function HomeGalleryView({
             })}
           </div>
 
-          {/* Album Cards Grid */}
           {filteredAlbums.length === 0 ? (
             <div className="text-center py-20 border border-dashed border-neutral-800 rounded-2xl">
               <Folder className="mx-auto text-neutral-600 mb-3" size={36} />
