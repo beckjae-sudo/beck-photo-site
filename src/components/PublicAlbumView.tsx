@@ -120,7 +120,6 @@ export default function PublicAlbumView() {
       document.body.removeChild(link);
       window.URL.revokeObjectURL(blobUrl);
     } catch {
-      // Direct download fallback
       const link = document.createElement("a");
       link.href = url;
       link.target = "_blank";
@@ -231,20 +230,22 @@ export default function PublicAlbumView() {
           )}
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+        {/* Dynamic Aspect Ratio Masonry Grid */}
+        <div className="columns-2 sm:columns-3 md:columns-4 gap-4">
           {photos.map((photo, idx) => (
             <div
               key={photo.id}
-              className="group relative rounded-xl overflow-hidden bg-neutral-900 border border-neutral-800 hover:border-neutral-700 transition aspect-4/3 cursor-pointer"
+              className="break-inside-avoid mb-4 group relative rounded-xl overflow-hidden bg-neutral-900 border border-neutral-800/90 hover:border-neutral-700 transition cursor-pointer"
               onClick={() => setSelectedIndex(idx)}
             >
               <img
                 src={photo.urls.thumb}
                 alt={photo.original_filename}
-                className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                className="w-full h-auto block object-cover group-hover:scale-[1.02] transition duration-300"
                 loading="lazy"
+                style={photo.aspect_ratio ? { aspectRatio: `${photo.aspect_ratio}` } : undefined}
               />
-              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2">
+              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center gap-2">
                 <span className="p-2 rounded-full bg-black/60 text-white backdrop-blur-md">
                   <Maximize2 size={16} />
                 </span>
@@ -262,7 +263,7 @@ export default function PublicAlbumView() {
         </div>
       </main>
 
-      {/* Lightbox Modal with Next / Prev */}
+      {/* Lightbox Modal */}
       {selectedPhoto !== null && selectedIndex !== null && (
         <div
           className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex items-center justify-center select-none"
@@ -326,7 +327,7 @@ export default function PublicAlbumView() {
         </div>
       )}
 
-      {/* ----------------- GENTLE POST-DOWNLOAD TOAST (z-[70] for priority over lightbox) ----------------- */}
+      {/* ----------------- GENTLE POST-DOWNLOAD TOAST ----------------- */}
       {showDownloadToast && (
         <div className="fixed bottom-6 right-6 z-[70] max-w-sm w-[calc(100vw-3rem)] p-4 rounded-xl bg-neutral-900/95 backdrop-blur-md border border-neutral-700/80 text-white shadow-2xl flex flex-col gap-2.5 animate-in fade-in slide-in-from-bottom-4 duration-300">
           <div className="flex items-start justify-between gap-2">
