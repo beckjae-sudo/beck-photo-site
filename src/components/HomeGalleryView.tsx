@@ -45,10 +45,6 @@ const themeStyles: Record<string, { bg: string; glow: string; pill: string }> = 
   },
 };
 
-const SPLASH_STORAGE_KEY = "beck_photo_splash_last_seen";
-const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
-
-// Helper to force high-res display version instead of thumbnail
 function getHighResCoverUrl(url: string): string {
   if (!url) return "";
   return url
@@ -64,27 +60,13 @@ export default function HomeGalleryView({
   albums: AlbumSummary[];
   config: SiteConfig;
 }) {
-  const [showSplash, setShowSplash] = useState<boolean | null>(null);
+  const [showSplash, setShowSplash] = useState(true);
   const [currentCoverIndex, setCurrentCoverIndex] = useState(0);
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
 
-  // Extract and upgrade album covers to high-res display versions
   const coverPhotos = albums
     .filter((a) => Boolean(a.cover_url))
     .map((a) => getHighResCoverUrl(a.cover_url));
-
-  useEffect(() => {
-    try {
-      const lastSeen = localStorage.getItem(SPLASH_STORAGE_KEY);
-      if (lastSeen && Date.now() - parseInt(lastSeen, 10) < SEVEN_DAYS_MS) {
-        setShowSplash(false);
-      } else {
-        setShowSplash(true);
-      }
-    } catch {
-      setShowSplash(true);
-    }
-  }, []);
 
   useEffect(() => {
     if (!showSplash || coverPhotos.length <= 1) return;
@@ -96,15 +78,6 @@ export default function HomeGalleryView({
     return () => clearInterval(interval);
   }, [showSplash, coverPhotos.length]);
 
-  function handleEnterGallery() {
-    try {
-      localStorage.setItem(SPLASH_STORAGE_KEY, Date.now().toString());
-    } catch (e) {
-      console.error(e);
-    }
-    setShowSplash(false);
-  }
-
   const activeTheme = themeStyles[config.theme_preset] || themeStyles["slate-glow"];
   const categories = ["All", ...(config.categories || ["School Sports", "Travel Teams", "Other Activities"])];
 
@@ -112,10 +85,6 @@ export default function HomeGalleryView({
     selectedCategory === "All"
       ? albums
       : albums.filter((album) => (album.category || "School Sports") === selectedCategory);
-
-  if (showSplash === null) {
-    return <div className="min-h-screen bg-black" />;
-  }
 
   return (
     <div className="relative min-h-screen bg-black text-neutral-100 overflow-x-hidden select-none">
@@ -176,7 +145,7 @@ export default function HomeGalleryView({
 
             {/* Apple-Style Frosted Liquid Glass Button */}
             <button
-              onClick={handleEnterGallery}
+              onClick={() => setShowSplash(false)}
               className="group relative flex items-center gap-3 px-8 py-3.5 rounded-full bg-white/10 hover:bg-white/20 active:bg-white/25 text-white text-xs font-semibold tracking-widest uppercase backdrop-blur-xl border border-white/25 hover:border-white/40 shadow-[0_8px_32px_0_rgba(0,0,0,0.5),inset_0_1px_1px_0_rgba(255,255,255,0.4)] transition-all duration-300 hover:scale-105 active:scale-95 cursor-pointer"
             >
               <span>Enter Gallery</span>
