@@ -57,10 +57,15 @@ export default function PublicAlbumView() {
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
 
-  // Fullscreen Immersive State
+  // Fullscreen & Cue State
   const [isImmersive, setIsImmersive] = useState(false);
-  const [showImmersiveControls, setShowImmersiveControls] = useState(true);
-  const immersiveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [navCue, setNavCue] = useState<"both" | "left" | "right" | "none">("none");
+  const [showExitPrompt, setShowExitPrompt] = useState(false);
+
+  const touchStartY = useRef<number>(0);
+  const touchStartX = useRef<number>(0);
+  const cueTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const exitPromptTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Modals & Toast State
   const [isSupportOpen, setIsSupportOpen] = useState(false);
@@ -106,6 +111,19 @@ export default function PublicAlbumView() {
     loadAlbum();
   }, [albumId]);
 
+  // Sync native browser fullscreen changes (e.g. user hits Escape on desktop)
+  useEffect(() => {
+    function onFullscreenChange() {
+      if (!document.fullscreenElement) {
+        setIsImmersive(false);
+        setShowExitPrompt(false);
+        setNavCue("none");
+      }
+    }
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+  }, []);
+
   useEffect(() => {
     if (!showDownloadToast) return;
     const timer = setTimeout(() => {
@@ -114,45 +132,40 @@ export default function PublicAlbumView() {
     return () => clearTimeout(timer);
   }, [showDownloadToast]);
 
-  // Immersive controls auto-fade timer
-  const resetImmersiveTimer = useCallback(() => {
-    setShowImmersiveControls(true);
-    if (immersiveTimerRef.current) clearTimeout(immersiveTimerRef.current);
-    immersiveTimerRef.current = setTimeout(() => {
-      setShowImmersiveControls(false);
-    }, 3500);
-  }, []);
+  const triggerCue = (type: "both" | "left" | "right", duration: number) => {
+    if (cueTimeoutRef.current) clearTimeout(cueTimeoutRef.current);
+    setNavCue(type);
+    cueTimeoutRef.current = setTimeout(() => {
+      setNavCue("none");
+    }, duration);
+  };
 
-  const toggleImmersive = async () => {
-    if (!isImmersive) {
-      setIsImmersive(true);
-      resetImmersiveTimer();
-      try {
-        if (document.documentElement.requestFullscreen) {
-          await document.documentElement.requestFullscreen();
-        }
-      } catch {
-        // Fallback for browsers without native document fullscreen
+  const enterFullscreen = async () => {
+    setIsImmersive(true);
+    setShowExitPrompt(false);
+    triggerCue("both", 1000);
+
+    try {
+      if (document.documentElement.requestFullscreen) {
+        await document.documentElement.requestFullscreen();
       }
-    } else {
-      setIsImmersive(false);
-      try {
-        if (document.fullscreenElement && document.exitFullscreen) {
-          await document.exitFullscreen();
-        }
-      } catch {
-        // Safe catch
+    } catch {}
+  };
+
+  const exitFullscreen = async () => {
+    setIsImmersive(false);
+    setShowExitPrompt(false);
+    setNavCue("none");
+
+    try {
+      if (document.fullscreenElement && document.exitFullscreen) {
+        await document.exitFullscreen();
       }
-    }
+    } catch {}
   };
 
   const exitLightbox = async () => {
-    if (document.fullscreenElement && document.exitFullscreen) {
-      try {
-        await document.exitFullscreen();
-      } catch {}
-    }
-    setIsImmersive(false);
+    await exitFullscreen();
     setSelectedIndex(null);
   };
 
@@ -205,24 +218,60 @@ export default function PublicAlbumView() {
   const showNext = useCallback(() => {
     if (selectedIndex === null || photos.length === 0) return;
     setSelectedIndex((prev) => (prev !== null && prev < photos.length - 1 ? prev + 1 : 0));
-    if (isImmersive) resetImmersiveTimer();
-  }, [selectedIndex, photos.length, isImmersive, resetImmersiveTimer]);
+  }, [selectedIndex, photos.length]);
 
   const showPrev = useCallback(() => {
     if (selectedIndex === null || photos.length === 0) return;
     setSelectedIndex((prev) => (prev !== null && prev > 0 ? prev - 1 : photos.length - 1));
-    if (isImmersive) resetImmersiveTimer();
-  }, [selectedIndex, photos.length, isImmersive, resetImmersiveTimer]);
+  }, [selectedIndex, photos.length]);
+
+  const handleFullscreenPrev = (e?: React.MouseEvent | React.TouchEvent) => {
+    if (e) e.stopPropagation();
+    showPrev();
+    triggerCue("left", 500);
+  };
+
+  const handleFullscreenNext = (e?: React.MouseEvent | React.TouchEvent) => {
+    if (e) e.stopPropagation();
+    showNext();
+    triggerCue("right", 500);
+  };
+
+  // Swipe detection for exiting fullscreen on touch devices
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartY.current = e.touches[0].clientY;
+    touchStartX.current = e.touches[0].clientX;
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    const deltaY = e.changedTouches[0].clientY - touchStartY.current;
+    const deltaX = e.changedTouches[0].clientX - touchStartX.current;
+
+    // Detect downward swipe (minimum 50px downward, primarily vertical)
+    if (deltaY > 50 && Math.abs(deltaY) > Math.abs(deltaX) * 1.5) {
+      setShowExitPrompt(true);
+      if (exitPromptTimeoutRef.current) clearTimeout(exitPromptTimeoutRef.current);
+      exitPromptTimeoutRef.current = setTimeout(() => {
+        setShowExitPrompt(false);
+      }, 4000);
+    }
+  };
 
   useEffect(() => {
     if (selectedIndex === null) return;
 
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "ArrowRight") showNext();
-      if (e.key === "ArrowLeft") showPrev();
+      if (e.key === "ArrowRight") {
+        showNext();
+        if (isImmersive) triggerCue("right", 500);
+      }
+      if (e.key === "ArrowLeft") {
+        showPrev();
+        if (isImmersive) triggerCue("left", 500);
+      }
       if (e.key === "Escape") {
         if (isImmersive) {
-          setIsImmersive(false);
+          exitFullscreen();
         } else {
           setSelectedIndex(null);
         }
@@ -332,7 +381,8 @@ export default function PublicAlbumView() {
                 loading="lazy"
                 style={photo.aspect_ratio ? { aspectRatio: `${photo.aspect_ratio}` } : undefined}
               />
-              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center gap-2">
+              {/* Desktop-only hover overlay (hidden on mobile to prevent accidental download taps) */}
+              <div className="hidden sm:flex absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-200 items-center justify-center gap-2">
                 <span className="p-2 rounded-full bg-black/60 text-white backdrop-blur-md">
                   <Maximize2 size={16} />
                 </span>
@@ -350,7 +400,7 @@ export default function PublicAlbumView() {
         </div>
       </main>
 
-      {/* ----------------- LIGHTBOX MODAL (STANDARD & IMMERSIVE) ----------------- */}
+      {/* ----------------- LIGHTBOX MODAL (STANDARD & FULLSCREEN) ----------------- */}
       {selectedPhoto !== null && selectedIndex !== null && (
         <div
           className={`fixed inset-0 z-50 bg-black flex items-center justify-center select-none overflow-hidden ${
@@ -358,142 +408,145 @@ export default function PublicAlbumView() {
           }`}
           onClick={exitLightbox}
         >
-          {/* Top Control Bar (Standard Mode) */}
+          {/* STANDARD MODE CONTROLS */}
           {!isImmersive && (
-            <div className="absolute top-4 right-4 flex items-center gap-2 z-50">
-              <span className="text-xs font-mono font-medium text-neutral-400 bg-white/5 px-2.5 py-1.5 rounded-lg border border-white/10">
-                {selectedIndex + 1} / {photos.length}
-              </span>
-
-              {/* Enter Fullscreen Button */}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleImmersive();
-                }}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur-md transition cursor-pointer"
-                title="Full Screen Immersive View"
-              >
-                <Maximize2 size={13} />
-                <span className="hidden sm:inline">Full Screen</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={(e) => handleDownload(e, selectedPhoto.urls.original, selectedPhoto.original_filename)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur-md transition cursor-pointer"
-              >
-                <Download size={13} />
-                <span className="hidden sm:inline">Download</span>
-              </button>
-
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  exitLightbox();
-                }}
-                className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-neutral-300 hover:text-white backdrop-blur-md transition cursor-pointer"
-              >
-                <X size={18} />
-              </button>
-            </div>
-          )}
-
-          {/* Desktop Arrow Buttons (Standard Mode) */}
-          {!isImmersive && photos.length > 1 && (
             <>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  showPrev();
-                }}
-                className="hidden sm:block absolute left-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-md transition z-50 cursor-pointer"
-                title="Previous Photo (Left Arrow)"
-              >
-                <ChevronLeft size={28} />
-              </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  showNext();
-                }}
-                className="hidden sm:block absolute right-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-md transition z-50 cursor-pointer"
-                title="Next Photo (Right Arrow)"
-              >
-                <ChevronRight size={28} />
-              </button>
+              {/* Top Bar */}
+              <div className="absolute top-4 right-4 flex items-center gap-2.5 z-50">
+                <span className="text-xs font-mono font-medium text-neutral-400 bg-white/5 px-2.5 py-1.5 rounded-lg border border-white/10">
+                  {selectedIndex + 1} / {photos.length}
+                </span>
+
+                {/* Prominent Blue Full Screen Button */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    enterFullscreen();
+                  }}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-lg shadow-blue-950/40 transition cursor-pointer"
+                  title="Full Screen View"
+                >
+                  <Maximize2 size={13} />
+                  <span>Full Screen</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={(e) => handleDownload(e, selectedPhoto.urls.original, selectedPhoto.original_filename)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur-md transition cursor-pointer"
+                >
+                  <Download size={13} />
+                  <span className="hidden sm:inline">Download</span>
+                </button>
+
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    exitLightbox();
+                  }}
+                  className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-neutral-300 hover:text-white backdrop-blur-md transition cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Desktop Previous / Next Buttons */}
+              {photos.length > 1 && (
+                <>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      showPrev();
+                    }}
+                    className="hidden sm:block absolute left-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-md transition z-50 cursor-pointer"
+                    title="Previous Photo (Left Arrow)"
+                  >
+                    <ChevronLeft size={28} />
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      showNext();
+                    }}
+                    className="hidden sm:block absolute right-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-md transition z-50 cursor-pointer"
+                    title="Next Photo (Right Arrow)"
+                  >
+                    <ChevronRight size={28} />
+                  </button>
+                </>
+              )}
+
+              {/* Standard Photo Display */}
+              <img
+                src={selectedPhoto.urls.display}
+                alt={selectedPhoto.original_filename}
+                className="max-h-[85vh] max-w-[85vw] object-contain rounded-lg shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              />
             </>
           )}
 
-          {/* ----------------- IMMERSIVE TAP ZONES & FLOATING HUD ----------------- */}
-          {isImmersive ? (
+          {/* ----------------- FULLSCREEN IMMERSIVE MODE ----------------- */}
+          {isImmersive && (
             <div
               className="relative w-full h-full flex items-center justify-center"
               onClick={(e) => e.stopPropagation()}
+              onTouchStart={handleTouchStart}
+              onTouchEnd={handleTouchEnd}
             >
               {/* Left 35% Tap Zone -> Previous */}
               <div
                 className="absolute left-0 top-0 bottom-0 w-[35%] z-20 cursor-w-resize"
-                onClick={showPrev}
+                onClick={handleFullscreenPrev}
               />
 
               {/* Right 35% Tap Zone -> Next */}
               <div
                 className="absolute right-0 top-0 bottom-0 w-[35%] z-20 cursor-e-resize"
-                onClick={showNext}
+                onClick={handleFullscreenNext}
               />
 
-              {/* Center 30% Tap Zone -> Toggle Controls HUD */}
-              <div
-                className="absolute left-[35%] right-[35%] top-0 bottom-0 z-20 cursor-pointer"
-                onClick={resetImmersiveTimer}
-              />
+              {/* Center 30% Tap Zone -> Does nothing */}
+              <div className="absolute left-[35%] right-[35%] top-0 bottom-0 z-20" />
 
-              {/* Immersive Photo (100% Screen Fitted) */}
+              {/* Fullscreen Photo */}
               <img
                 src={selectedPhoto.urls.display}
                 alt={selectedPhoto.original_filename}
                 className="w-full h-full object-contain pointer-events-none select-none"
               />
 
-              {/* Floating Minimal HUD Bar */}
+              {/* Faint Chevron Visual Cues */}
               <div
-                className={`absolute top-5 inset-x-0 mx-auto w-fit z-30 flex items-center gap-2 p-1.5 bg-black/75 backdrop-blur-xl border border-white/20 rounded-full shadow-2xl transition-all duration-300 ${
-                  showImmersiveControls
-                    ? "opacity-100 translate-y-0"
-                    : "opacity-0 -translate-y-4 pointer-events-none"
+                className={`pointer-events-none absolute left-4 sm:left-8 top-1/2 -translate-y-1/2 transition-opacity duration-300 z-30 ${
+                  navCue === "both" || navCue === "left" ? "opacity-35" : "opacity-0"
                 }`}
               >
-                <span className="text-[11px] font-mono text-neutral-300 px-3">
-                  {selectedIndex + 1} / {photos.length}
-                </span>
-
-                <button
-                  onClick={(e) => handleDownload(e, selectedPhoto.urls.original, selectedPhoto.original_filename)}
-                  className="p-2 rounded-full bg-white/10 hover:bg-white/25 text-white transition cursor-pointer"
-                  title="Download Original"
-                >
-                  <Download size={14} />
-                </button>
-
-                <button
-                  onClick={toggleImmersive}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-lg shadow-blue-950/40 transition cursor-pointer"
-                >
-                  <Minimize2 size={13} />
-                  <span>Exit Full Screen</span>
-                </button>
+                <ChevronLeft className="w-12 h-12 sm:w-16 sm:h-16 text-white stroke-[2.5]" />
               </div>
+
+              <div
+                className={`pointer-events-none absolute right-4 sm:right-8 top-1/2 -translate-y-1/2 transition-opacity duration-300 z-30 ${
+                  navCue === "both" || navCue === "right" ? "opacity-35" : "opacity-0"
+                }`}
+              >
+                <ChevronRight className="w-12 h-12 sm:w-16 sm:h-16 text-white stroke-[2.5]" />
+              </div>
+
+              {/* Swipe-Down Exit Prompt */}
+              {showExitPrompt && (
+                <div className="absolute top-6 inset-x-0 mx-auto w-fit z-40 animate-in fade-in slide-in-from-top-3 duration-200">
+                  <button
+                    onClick={exitFullscreen}
+                    className="flex items-center gap-2 px-4 py-2 rounded-full bg-neutral-900/90 hover:bg-neutral-800 text-white border border-neutral-700 shadow-2xl backdrop-blur-xl text-xs font-semibold cursor-pointer"
+                  >
+                    <Minimize2 size={13} className="text-blue-400" />
+                    <span>Exit Full Screen</span>
+                  </button>
+                </div>
+              )}
             </div>
-          ) : (
-            /* Standard Lightbox View Photo */
-            <img
-              src={selectedPhoto.urls.display}
-              alt={selectedPhoto.original_filename}
-              className="max-h-[85vh] max-w-[85vw] object-contain rounded-lg shadow-2xl"
-              onClick={(e) => e.stopPropagation()}
-            />
           )}
         </div>
       )}
