@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -16,8 +16,10 @@ import {
   AlertCircle,
   Coffee,
   ArrowRight,
+  Share2,
 } from "lucide-react";
 import SupportModal, { FundType } from "@/components/SupportModal";
+import ShareModal from "@/components/ShareModal";
 
 interface Photo {
   id: string;
@@ -42,8 +44,12 @@ interface AlbumData {
 
 export default function PublicAlbumView() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const rawId = params?.id;
   const albumId = Array.isArray(rawId) ? rawId[0] : (rawId as string) || "";
+
+  // Check if visitor arrived via personalized link
+  const viewerName = searchParams?.get("v");
 
   const [album, setAlbum] = useState<AlbumData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -51,9 +57,10 @@ export default function PublicAlbumView() {
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
 
-  // Support Modal & Download Toast States
+  // Modals & Toast State
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [supportFund, setSupportFund] = useState<FundType>("gear");
+  const [isShareOpen, setIsShareOpen] = useState(false);
   const [showDownloadToast, setShowDownloadToast] = useState(false);
 
   useEffect(() => {
@@ -94,7 +101,6 @@ export default function PublicAlbumView() {
     loadAlbum();
   }, [albumId]);
 
-  // Handle Download Toast Auto-Dismiss
   useEffect(() => {
     if (!showDownloadToast) return;
     const timer = setTimeout(() => {
@@ -103,7 +109,6 @@ export default function PublicAlbumView() {
     return () => clearTimeout(timer);
   }, [showDownloadToast]);
 
-  // Silent Background Downloader
   const handleDownload = async (e: React.MouseEvent, url: string, filename: string) => {
     e.stopPropagation();
     setShowDownloadToast(true);
@@ -128,6 +133,22 @@ export default function PublicAlbumView() {
     }
   };
 
+  const handleShare = async () => {
+    if (typeof navigator !== "undefined" && navigator.share) {
+      try {
+        await navigator.share({
+          title: album?.title || "Beck Photo Gallery",
+          text: `Check out high-resolution game shots from "${album?.title}":`,
+          url: window.location.href,
+        });
+        return;
+      } catch (err) {
+        // Fallback to custom modal if user cancels or browser rejects
+      }
+    }
+    setIsShareOpen(true);
+  };
+
   const openSupport = (fund: FundType = "gear") => {
     setSupportFund(fund);
     setIsSupportOpen(true);
@@ -146,7 +167,6 @@ export default function PublicAlbumView() {
     setSelectedIndex((prev) => (prev !== null && prev > 0 ? prev - 1 : photos.length - 1));
   }, [selectedIndex, photos.length]);
 
-  // Keyboard navigation
   useEffect(() => {
     if (selectedIndex === null) return;
 
@@ -196,15 +216,25 @@ export default function PublicAlbumView() {
             <ArrowLeft size={14} /> Back to Galleries
           </Link>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
+            {/* Share Button */}
+            <button
+              onClick={handleShare}
+              className="flex items-center gap-1.5 text-xs font-mono text-neutral-300 hover:text-white transition py-1.5 px-3 rounded-lg bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 cursor-pointer shadow-sm"
+              title="Share this album"
+            >
+              <Share2 size={12} className="text-blue-400" />
+              <span>SHARE</span>
+            </button>
+
+            {/* Support Trigger */}
             <button
               onClick={() => openSupport("gear")}
               className="flex items-center gap-1.5 text-xs font-mono text-neutral-300 hover:text-white transition py-1.5 px-3 rounded-lg bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 cursor-pointer shadow-sm"
               title="Sideline Support & Gear Funds"
             >
               <Coffee size={12} className="text-amber-400" />
-              <span className="hidden sm:inline">SUPPORT // FUNDS</span>
-              <span className="sm:hidden">SUPPORT</span>
+              <span className="hidden sm:inline">SUPPORT</span>
             </button>
 
             <span className="text-xs font-mono text-neutral-500 flex items-center gap-1 pl-1">
@@ -216,8 +246,14 @@ export default function PublicAlbumView() {
 
       <main className="max-w-7xl mx-auto px-6 pt-10 space-y-8">
         <div className="space-y-2">
+          {viewerName && (
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono bg-blue-950/60 border border-blue-800/80 text-blue-300">
+              <span>👋 Welcome, {viewerName}!</span>
+            </div>
+          )}
+
           {album.category && (
-            <span className="text-xs font-semibold uppercase tracking-wider text-blue-400 font-mono">
+            <span className="text-xs font-semibold uppercase tracking-wider text-blue-400 font-mono block">
               {album.category}
             </span>
           )}
@@ -269,7 +305,6 @@ export default function PublicAlbumView() {
           className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex items-center justify-center select-none"
           onClick={() => setSelectedIndex(null)}
         >
-          {/* Top Bar: Counter, Download, Close */}
           <div className="absolute top-4 right-4 flex items-center gap-3 z-50">
             <span className="text-xs font-mono font-medium text-neutral-400 bg-white/5 px-2.5 py-1.5 rounded-lg border border-white/10">
               {selectedIndex + 1} / {photos.length}
@@ -289,7 +324,6 @@ export default function PublicAlbumView() {
             </button>
           </div>
 
-          {/* Previous Button */}
           {photos.length > 1 && (
             <button
               onClick={(e) => {
@@ -303,7 +337,6 @@ export default function PublicAlbumView() {
             </button>
           )}
 
-          {/* Photo Display */}
           <img
             src={selectedPhoto.urls.display}
             alt={selectedPhoto.original_filename}
@@ -311,7 +344,6 @@ export default function PublicAlbumView() {
             onClick={(e) => e.stopPropagation()}
           />
 
-          {/* Next Button */}
           {photos.length > 1 && (
             <button
               onClick={(e) => {
@@ -327,7 +359,7 @@ export default function PublicAlbumView() {
         </div>
       )}
 
-      {/* ----------------- GENTLE POST-DOWNLOAD TOAST ----------------- */}
+      {/* Gentle Post-Download Toast */}
       {showDownloadToast && (
         <div className="fixed bottom-6 right-6 z-[70] max-w-sm w-[calc(100vw-3rem)] p-4 rounded-xl bg-neutral-900/95 backdrop-blur-md border border-neutral-700/80 text-white shadow-2xl flex flex-col gap-2.5 animate-in fade-in slide-in-from-bottom-4 duration-300">
           <div className="flex items-start justify-between gap-2">
@@ -364,7 +396,15 @@ export default function PublicAlbumView() {
         </div>
       )}
 
-      {/* ----------------- SUPPORT MODAL ----------------- */}
+      {/* Share Modal */}
+      <ShareModal
+        isOpen={isShareOpen}
+        onClose={() => setIsShareOpen(false)}
+        albumTitle={album.title}
+        albumId={albumId}
+      />
+
+      {/* Support Modal */}
       <SupportModal
         isOpen={isSupportOpen}
         onClose={() => setIsSupportOpen(false)}
