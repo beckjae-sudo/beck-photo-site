@@ -1,9 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Download, Calendar, Layers, Loader2, Maximize2, X, AlertCircle } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  Calendar,
+  Layers,
+  Loader2,
+  Maximize2,
+  X,
+  AlertCircle
+} from "lucide-react";
 
 interface Photo {
   id: string;
@@ -35,7 +46,7 @@ export default function PublicAlbumView() {
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
-  const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
 
   useEffect(() => {
     if (!albumId) return;
@@ -75,6 +86,33 @@ export default function PublicAlbumView() {
     loadAlbum();
   }, [albumId]);
 
+  const photos = album?.photos || [];
+  const selectedPhoto = selectedIndex !== null ? photos[selectedIndex] : null;
+
+  const showNext = useCallback(() => {
+    if (selectedIndex === null || photos.length === 0) return;
+    setSelectedIndex((prev) => (prev !== null && prev < photos.length - 1 ? prev + 1 : 0));
+  }, [selectedIndex, photos.length]);
+
+  const showPrev = useCallback(() => {
+    if (selectedIndex === null || photos.length === 0) return;
+    setSelectedIndex((prev) => (prev !== null && prev > 0 ? prev - 1 : photos.length - 1));
+  }, [selectedIndex, photos.length]);
+
+  // Keyboard navigation
+  useEffect(() => {
+    if (selectedIndex === null) return;
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "ArrowRight") showNext();
+      if (e.key === "ArrowLeft") showPrev();
+      if (e.key === "Escape") setSelectedIndex(null);
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedIndex, showNext, showPrev]);
+
   if (loading) {
     return (
       <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center text-white gap-3">
@@ -111,7 +149,7 @@ export default function PublicAlbumView() {
             <ArrowLeft size={14} /> Back to Galleries
           </Link>
           <span className="text-xs font-medium text-neutral-500 flex items-center gap-1">
-            <Layers size={12} /> {album.photos?.length || 0} photos
+            <Layers size={12} /> {photos.length} photos
           </span>
         </div>
       </header>
@@ -133,11 +171,11 @@ export default function PublicAlbumView() {
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-          {album.photos?.map((photo) => (
+          {photos.map((photo, idx) => (
             <div
               key={photo.id}
               className="group relative rounded-xl overflow-hidden bg-neutral-900 border border-neutral-800 hover:border-neutral-700 transition aspect-4/3 cursor-pointer"
-              onClick={() => setSelectedPhoto(photo)}
+              onClick={() => setSelectedIndex(idx)}
             >
               <img
                 src={photo.urls.thumb}
@@ -164,12 +202,17 @@ export default function PublicAlbumView() {
         </div>
       </main>
 
-      {selectedPhoto && (
+      {/* Lightbox Modal with Next / Prev */}
+      {selectedPhoto !== null && selectedIndex !== null && (
         <div
-          className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col items-center justify-center p-4"
-          onClick={() => setSelectedPhoto(null)}
+          className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex items-center justify-center select-none"
+          onClick={() => setSelectedIndex(null)}
         >
-          <div className="absolute top-4 right-4 flex items-center gap-3">
+          {/* Top Bar: Counter, Download, Close */}
+          <div className="absolute top-4 right-4 flex items-center gap-3 z-50">
+            <span className="text-xs font-medium text-neutral-400 bg-white/5 px-2.5 py-1 rounded-md border border-white/10">
+              {selectedIndex + 1} / {photos.length}
+            </span>
             <a
               href={selectedPhoto.urls.original}
               download
@@ -179,19 +222,48 @@ export default function PublicAlbumView() {
               <Download size={14} /> Download Original
             </a>
             <button
-              onClick={() => setSelectedPhoto(null)}
+              onClick={() => setSelectedIndex(null)}
               className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-neutral-300 hover:text-white backdrop-blur-md transition"
             >
               <X size={20} />
             </button>
           </div>
 
+          {/* Previous Button */}
+          {photos.length > 1 && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                showPrev();
+              }}
+              className="absolute left-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-md transition z-50"
+              title="Previous Photo (Left Arrow)"
+            >
+              <ChevronLeft size={28} />
+            </button>
+          )}
+
+          {/* Photo Display */}
           <img
             src={selectedPhoto.urls.display}
             alt={selectedPhoto.original_filename}
-            className="max-h-[85vh] max-w-[90vw] object-contain rounded-lg shadow-2xl"
+            className="max-h-[85vh] max-w-[85vw] object-contain rounded-lg shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           />
+
+          {/* Next Button */}
+          {photos.length > 1 && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                showNext();
+              }}
+              className="absolute right-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-md transition z-50"
+              title="Next Photo (Right Arrow)"
+            >
+              <ChevronRight size={28} />
+            </button>
+          )}
         </div>
       )}
     </div>
