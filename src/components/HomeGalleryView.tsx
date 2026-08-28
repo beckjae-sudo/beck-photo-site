@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Folder, Calendar, Layers, Sparkles, ArrowRight } from "lucide-react";
+import { Folder, Calendar, Layers, Sparkles, ArrowRight, Instagram } from "lucide-react";
 
 export interface AlbumSummary {
   id: string;
@@ -21,6 +21,9 @@ export interface SiteConfig {
   theme_preset: string;
   categories: string[];
 }
+
+const INSTAGRAM_HANDLE = "shot.by.jaden2";
+const INSTAGRAM_URL = `https://instagram.com/${INSTAGRAM_HANDLE}`;
 
 const themeStyles: Record<string, { bg: string; glow: string; pill: string }> = {
   "slate-glow": {
@@ -124,7 +127,7 @@ export default function HomeGalleryView({
             <span>{albums.length} GALLERIES</span>
           </div>
 
-          {/* Center Brand Identity (Verge Modular Aesthetic) */}
+          {/* Center Brand Identity */}
           <div className="relative z-10 text-center space-y-7 max-w-3xl mx-auto flex flex-col items-center">
             <div className="space-y-3">
               <h1 className="text-5xl sm:text-7xl md:text-8xl font-black uppercase tracking-[-0.07em] text-white flex items-center justify-center gap-2 drop-shadow-2xl">
@@ -143,14 +146,31 @@ export default function HomeGalleryView({
               </p>
             </div>
 
-            {/* Apple-Style Frosted Liquid Glass Button */}
-            <button
-              onClick={() => setShowSplash(false)}
-              className="group relative flex items-center gap-3 px-8 py-3.5 rounded-full bg-white/10 hover:bg-white/20 active:bg-white/25 text-white text-xs font-semibold tracking-widest uppercase backdrop-blur-xl border border-white/25 hover:border-white/40 shadow-[0_8px_32px_0_rgba(0,0,0,0.5),inset_0_1px_1px_0_rgba(255,255,255,0.4)] transition-all duration-300 hover:scale-105 active:scale-95 cursor-pointer"
-            >
-              <span>Enter Gallery</span>
-              <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform text-blue-400" />
-            </button>
+            {/* Actions & Social Showcase */}
+            <div className="flex flex-col items-center gap-4">
+              {/* Apple-Style Frosted Liquid Glass Button */}
+              <button
+                onClick={() => setShowSplash(false)}
+                className="group relative flex items-center gap-3 px-8 py-3.5 rounded-full bg-white/10 hover:bg-white/20 active:bg-white/25 text-white text-xs font-semibold tracking-widest uppercase backdrop-blur-xl border border-white/25 hover:border-white/40 shadow-[0_8px_32px_0_rgba(0,0,0,0.5),inset_0_1px_1px_0_rgba(255,255,255,0.4)] transition-all duration-300 hover:scale-105 active:scale-95 cursor-pointer"
+              >
+                <span>Enter Gallery</span>
+                <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform text-blue-400" />
+              </button>
+
+              {/* Jaden Beck Instagram Feature Pill */}
+              <a
+                href={INSTAGRAM_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-black/50 hover:bg-black/80 backdrop-blur-md border border-white/15 hover:border-white/30 text-[11px] text-neutral-300 hover:text-white transition-all duration-300 hover:scale-[1.02] shadow-lg group"
+              >
+                <Instagram size={13} className="text-pink-400 group-hover:scale-110 transition-transform" />
+                <span>
+                  Follow more of Jaden Beck&apos;s work{" "}
+                  <span className="font-semibold text-white group-hover:underline">@{INSTAGRAM_HANDLE}</span>
+                </span>
+              </a>
+            </div>
           </div>
 
           {/* Bottom Bar */}
@@ -161,118 +181,157 @@ export default function HomeGalleryView({
       )}
 
       {/* ----------------- HOME GALLERY DIRECTORY ----------------- */}
-      <div className={`min-h-screen ${activeTheme.bg} relative overflow-hidden`}>
+      <div className={`min-h-screen ${activeTheme.bg} relative flex flex-col justify-between overflow-hidden`}>
         <div className={`pointer-events-none absolute inset-0 ${activeTheme.glow}`} />
 
-        <header className="border-b border-neutral-800/60 sticky top-0 z-30 bg-neutral-950/75 backdrop-blur-md">
-          <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-            <button
-              onClick={() => setShowSplash(true)}
-              className="font-black text-sm tracking-tighter uppercase text-white flex items-center gap-1 hover:opacity-80 transition cursor-pointer"
-              title="Return to Splash Screen"
-            >
-              <span>BECK</span>
-              <span className="text-blue-500 font-light">/</span>
-              <span>PHOTO</span>
-            </button>
-            <span className="text-xs font-mono text-neutral-500">
-              {albums.length} GALLERIES
-            </span>
-          </div>
-        </header>
+        <div>
+          {/* Header */}
+          <header className="border-b border-neutral-800/60 sticky top-0 z-30 bg-neutral-950/75 backdrop-blur-md">
+            <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+              <button
+                onClick={() => setShowSplash(true)}
+                className="font-black text-sm tracking-tighter uppercase text-white flex items-center gap-1 hover:opacity-80 transition cursor-pointer"
+                title="Return to Splash Screen"
+              >
+                <span>BECK</span>
+                <span className="text-blue-500 font-light">/</span>
+                <span>PHOTO</span>
+              </button>
 
-        <main className="relative max-w-7xl mx-auto px-6 py-12 md:py-16 space-y-12">
-          <div className="space-y-4 max-w-2xl">
-            {config.badge_text && (
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-neutral-900/80 border border-neutral-800 text-neutral-300">
-                <Sparkles size={13} className="text-amber-400" />
-                <span>{config.badge_text}</span>
-              </div>
-            )}
-            <h2 className="text-3xl md:text-5xl font-extrabold tracking-tight text-white">
-              {config.hero_headline || "Sports Photo Gallery"}
-            </h2>
-            <p className="text-neutral-400 text-sm md:text-base leading-relaxed">
-              {config.hero_description || "Browse recent game albums and download high-resolution photos."}
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 border-b border-neutral-800/80 pb-4">
-            {categories.map((cat) => {
-              const isActive = selectedCategory === cat;
-              return (
-                <button
-                  key={cat}
-                  onClick={() => setSelectedCategory(cat)}
-                  className={`px-4 py-1.5 rounded-full text-xs font-semibold transition border ${
-                    isActive
-                      ? "bg-white text-black border-white shadow-sm"
-                      : `${activeTheme.pill}`
-                  }`}
+              <div className="flex items-center gap-4">
+                {/* Subtle Social Link */}
+                <a
+                  href={INSTAGRAM_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hidden sm:flex items-center gap-1.5 text-xs font-mono text-neutral-400 hover:text-white transition py-1 px-2.5 rounded-lg hover:bg-neutral-900 border border-transparent hover:border-neutral-800"
+                  title="Follow Jaden Beck on Instagram"
                 >
-                  {cat}
-                </button>
-              );
-            })}
-          </div>
+                  <Instagram size={12} className="text-neutral-400" />
+                  <span>@{INSTAGRAM_HANDLE}</span>
+                </a>
 
-          {filteredAlbums.length === 0 ? (
-            <div className="text-center py-20 border border-dashed border-neutral-800 rounded-2xl">
-              <Folder className="mx-auto text-neutral-600 mb-3" size={36} />
-              <p className="text-sm font-semibold text-neutral-300">No albums found</p>
-              <p className="text-xs text-neutral-500 mt-1">
-                Upload photos in the Admin studio to publish your first album.
+                <span className="text-xs font-mono text-neutral-500">
+                  {albums.length} GALLERIES
+                </span>
+              </div>
+            </div>
+          </header>
+
+          {/* Main Content */}
+          <main className="relative max-w-7xl mx-auto px-6 py-12 md:py-16 space-y-12">
+            <div className="space-y-4 max-w-2xl">
+              {config.badge_text && (
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-neutral-900/80 border border-neutral-800 text-neutral-300">
+                  <Sparkles size={13} className="text-amber-400" />
+                  <span>{config.badge_text}</span>
+                </div>
+              )}
+              <h2 className="text-3xl md:text-5xl font-extrabold tracking-tight text-white">
+                {config.hero_headline || "Sports Photo Gallery"}
+              </h2>
+              <p className="text-neutral-400 text-sm md:text-base leading-relaxed">
+                {config.hero_description || "Browse recent game albums and download high-resolution photos."}
               </p>
             </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredAlbums.map((album) => (
-                <Link
-                  key={album.id}
-                  href={`/album/${album.id}`}
-                  className="group relative rounded-2xl overflow-hidden border border-neutral-800/80 hover:border-neutral-600 transition bg-neutral-900/40 flex flex-col"
-                >
-                  <div className="relative aspect-4/3 overflow-hidden bg-neutral-900">
-                    {album.cover_url ? (
-                      <img
-                        src={album.cover_url}
-                        alt={album.title}
-                        className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-neutral-700">
-                        <Folder size={40} />
-                      </div>
-                    )}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
 
-                    {album.category && (
-                      <span className="absolute top-3 left-3 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-black/60 backdrop-blur-md text-neutral-300 border border-white/10">
-                        {album.category}
-                      </span>
-                    )}
-
-                    <span className="absolute bottom-3 right-3 px-2 py-0.5 rounded text-[10px] font-medium bg-black/60 backdrop-blur-md text-neutral-300 flex items-center gap-1 border border-white/10">
-                      <Layers size={11} /> {album.photo_count || 0} photos
-                    </span>
-                  </div>
-
-                  <div className="p-5 space-y-1.5 flex-1 flex flex-col justify-end">
-                    <h3 className="text-base font-bold text-white group-hover:text-blue-400 transition">
-                      {album.title}
-                    </h3>
-                    {album.date && (
-                      <div className="flex items-center gap-1.5 text-xs text-neutral-400">
-                        <Calendar size={13} />
-                        <span>{album.date}</span>
-                      </div>
-                    )}
-                  </div>
-                </Link>
-              ))}
+            <div className="flex flex-wrap items-center gap-2 border-b border-neutral-800/80 pb-4">
+              {categories.map((cat) => {
+                const isActive = selectedCategory === cat;
+                return (
+                  <button
+                    key={cat}
+                    onClick={() => setSelectedCategory(cat)}
+                    className={`px-4 py-1.5 rounded-full text-xs font-semibold transition border ${
+                      isActive
+                        ? "bg-white text-black border-white shadow-sm"
+                        : `${activeTheme.pill}`
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                );
+              })}
             </div>
-          )}
-        </main>
+
+            {filteredAlbums.length === 0 ? (
+              <div className="text-center py-20 border border-dashed border-neutral-800 rounded-2xl">
+                <Folder className="mx-auto text-neutral-600 mb-3" size={36} />
+                <p className="text-sm font-semibold text-neutral-300">No albums found</p>
+                <p className="text-xs text-neutral-500 mt-1">
+                  Upload photos in the Admin studio to publish your first album.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredAlbums.map((album) => (
+                  <Link
+                    key={album.id}
+                    href={`/album/${album.id}`}
+                    className="group relative rounded-2xl overflow-hidden border border-neutral-800/80 hover:border-neutral-600 transition bg-neutral-900/40 flex flex-col"
+                  >
+                    <div className="relative aspect-4/3 overflow-hidden bg-neutral-900">
+                      {album.cover_url ? (
+                        <img
+                          src={album.cover_url}
+                          alt={album.title}
+                          className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-neutral-700">
+                          <Folder size={40} />
+                        </div>
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+
+                      {album.category && (
+                        <span className="absolute top-3 left-3 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-black/60 backdrop-blur-md text-neutral-300 border border-white/10">
+                          {album.category}
+                        </span>
+                      )}
+
+                      <span className="absolute bottom-3 right-3 px-2 py-0.5 rounded text-[10px] font-medium bg-black/60 backdrop-blur-md text-neutral-300 flex items-center gap-1 border border-white/10">
+                        <Layers size={11} /> {album.photo_count || 0} photos
+                      </span>
+                    </div>
+
+                    <div className="p-5 space-y-1.5 flex-1 flex flex-col justify-end">
+                      <h3 className="text-base font-bold text-white group-hover:text-blue-400 transition">
+                        {album.title}
+                      </h3>
+                      {album.date && (
+                        <div className="flex items-center gap-1.5 text-xs text-neutral-400">
+                          <Calendar size={13} />
+                          <span>{album.date}</span>
+                        </div>
+                      )}
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </main>
+        </div>
+
+        {/* Discreet Gallery Footer */}
+        <footer className="border-t border-neutral-900 bg-neutral-950/60 mt-20">
+          <div className="max-w-7xl mx-auto px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-neutral-500 font-mono">
+            <div>
+              <span>BECK / PHOTO © {new Date().getFullYear()}</span>
+            </div>
+            <div className="flex items-center gap-6">
+              <a
+                href={INSTAGRAM_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-neutral-300 transition flex items-center gap-1.5"
+              >
+                <Instagram size={13} />
+                <span>@{INSTAGRAM_HANDLE}</span>
+              </a>
+            </div>
+          </div>
+        </footer>
       </div>
     </div>
   );
