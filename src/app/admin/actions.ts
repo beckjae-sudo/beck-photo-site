@@ -169,9 +169,9 @@ export async function updateExistingAlbum(albumData: {
       })
     );
 
-    const baseUrl = process.env.NEXT_PUBLIC_R2_BASE_URL?.replace(/\/$/, "");
+    const baseUrl = process.env.NEXT_PUBLIC_R2_BASE_URL?.trim().replace(/\/$/, "");
     let albums: any[] = [];
-    if (baseUrl) {
+    if (baseUrl && baseUrl.startsWith("http")) {
       try {
         const res = await fetch(`${baseUrl}/albums.json`, { cache: "no-store" });
         if (res.ok) albums = await res.json();
