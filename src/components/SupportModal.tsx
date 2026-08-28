@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, ExternalLink, HardDrive, Sparkles, Coffee, Heart, Check, Copy } from "lucide-react";
+import { X, ExternalLink, HardDrive, Sparkles, Heart, Check, Copy } from "lucide-react";
 
-export type FundType = "gear" | "jaden" | "shutter";
+export type FundType = "gear" | "jaden";
 
 interface SupportModalProps {
   isOpen: boolean;
@@ -43,16 +43,6 @@ const FUNDS: Record<FundType, FundDetails> = {
     description: "Direct support for Jaden's time behind the lens, editing sideline action, and high school creative projects.",
     icon: Sparkles,
   },
-  shutter: {
-    id: "shutter",
-    title: "Fuel the Shutter",
-    tagline: "Photographer Appreciation",
-    handle: "Jae-Beck-1",
-    note: "Fuel the Shutter",
-    badge: "SIDELINE COFFEE",
-    description: "Game day photos are always open access. For anyone wanting to fuel the photographer's road trips or morning caffeine runs, this is the spot.",
-    icon: Coffee,
-  },
 };
 
 export default function SupportModal({ isOpen, onClose, defaultFund = "gear" }: SupportModalProps) {
@@ -68,11 +58,9 @@ export default function SupportModal({ isOpen, onClose, defaultFund = "gear" }: 
 
   if (!isOpen) return null;
 
-  const current = FUNDS[selectedFund];
+  const current = FUNDS[selectedFund] || FUNDS["gear"];
   const venmoWebUrl = `https://venmo.com/u/${current.handle}?txn=pay&note=${encodeURIComponent(current.note)}`;
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(
-    venmoWebUrl
-  )}&bgcolor=18-18-1b&color=255-255-255&margin=8`;
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(venmoWebUrl)}`;
 
   const copyHandle = () => {
     navigator.clipboard.writeText(`@${current.handle}`);
@@ -82,15 +70,15 @@ export default function SupportModal({ isOpen, onClose, defaultFund = "gear" }: 
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 select-none animate-in fade-in duration-200"
+      className="fixed inset-0 z-[80] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 select-none animate-in fade-in duration-200"
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-xl bg-neutral-950 border border-neutral-800 rounded-2xl shadow-2xl overflow-hidden"
+        className="relative w-full max-w-lg bg-neutral-950 border border-neutral-800 rounded-2xl shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="p-6 border-b border-neutral-800/80 flex items-center justify-between bg-neutral-900/40">
+        <div className="p-5 border-b border-neutral-800/80 flex items-center justify-between bg-neutral-900/40">
           <div className="flex items-center gap-2">
             <span className="p-1.5 rounded-lg bg-neutral-800 border border-neutral-700 text-amber-400">
               <Heart size={15} fill="currentColor" />
@@ -106,14 +94,14 @@ export default function SupportModal({ isOpen, onClose, defaultFund = "gear" }: 
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-neutral-400 hover:text-white rounded-lg hover:bg-neutral-800 transition"
+            className="p-1.5 text-neutral-400 hover:text-white rounded-lg hover:bg-neutral-800 transition cursor-pointer"
           >
             <X size={18} />
           </button>
         </div>
 
-        {/* 3 Fund Selector Tabs */}
-        <div className="grid grid-cols-3 border-b border-neutral-800 bg-neutral-900/20 text-xs font-mono">
+        {/* 2 Fund Selector Tabs */}
+        <div className="grid grid-cols-2 border-b border-neutral-800 bg-neutral-900/20 text-xs font-mono">
           {(Object.keys(FUNDS) as FundType[]).map((fundKey) => {
             const f = FUNDS[fundKey];
             const Icon = f.icon;
@@ -125,14 +113,14 @@ export default function SupportModal({ isOpen, onClose, defaultFund = "gear" }: 
                   setSelectedFund(fundKey);
                   setCopied(false);
                 }}
-                className={`flex flex-col sm:flex-row items-center justify-center gap-1.5 py-3 px-2 transition border-b-2 text-center ${
+                className={`flex items-center justify-center gap-2 py-3 px-3 transition border-b-2 text-center cursor-pointer ${
                   isActive
                     ? "border-blue-500 bg-neutral-800/60 text-white font-bold"
                     : "border-transparent text-neutral-400 hover:text-neutral-200 hover:bg-neutral-900/40"
                 }`}
               >
-                <Icon size={13} className={isActive ? "text-blue-400" : "text-neutral-500"} />
-                <span className="truncate">{f.title.replace("The ", "")}</span>
+                <Icon size={14} className={isActive ? "text-blue-400" : "text-neutral-500"} />
+                <span className="truncate">{f.title}</span>
               </button>
             );
           })}
@@ -151,7 +139,7 @@ export default function SupportModal({ isOpen, onClose, defaultFund = "gear" }: 
 
             <button
               onClick={copyHandle}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-900 border border-neutral-800 hover:border-neutral-700 text-xs font-mono text-neutral-300 hover:text-white transition"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-900 border border-neutral-800 hover:border-neutral-700 text-xs font-mono text-neutral-300 hover:text-white transition cursor-pointer"
             >
               {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
               <span>@{current.handle}</span>
@@ -159,29 +147,31 @@ export default function SupportModal({ isOpen, onClose, defaultFund = "gear" }: 
           </div>
 
           <p className="text-xs text-neutral-300 leading-relaxed bg-neutral-900/60 border border-neutral-800/80 p-3.5 rounded-xl font-sans">
-            "{current.description}"
+            &quot;{current.description}&quot;
           </p>
 
           {/* Payment Action Container */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center bg-neutral-900/30 border border-neutral-800/80 p-4 rounded-xl">
-            {/* Desktop QR Display */}
-            <div className="flex flex-col items-center justify-center p-3 bg-neutral-900 border border-neutral-800 rounded-lg space-y-2">
+            {/* Desktop High-Contrast QR Display */}
+            <div className="flex flex-col items-center justify-center p-3.5 bg-white rounded-xl shadow-inner space-y-2">
               <img
                 src={qrUrl}
                 alt={`Venmo QR for @${current.handle}`}
-                className="w-32 h-32 rounded object-contain"
+                className="w-32 h-32 object-contain"
               />
-              <span className="text-[10px] text-neutral-400 font-mono">Scan with Phone Camera</span>
+              <span className="text-[10px] text-neutral-700 font-mono font-semibold">
+                Scan with Phone Camera
+              </span>
             </div>
 
-            {/* Mobile / Direct Button */}
+            {/* Mobile / Direct Link */}
             <div className="space-y-3 flex flex-col justify-center">
               <div className="space-y-1">
                 <span className="text-[10px] font-mono text-neutral-400 uppercase tracking-wider block">
                   Direct Link / Mobile
                 </span>
                 <p className="text-xs text-neutral-300">
-                  Opens Venmo with recipient & note pre-filled.
+                  Opens Venmo with recipient &amp; note pre-filled.
                 </p>
               </div>
 
@@ -196,7 +186,7 @@ export default function SupportModal({ isOpen, onClose, defaultFund = "gear" }: 
               </a>
 
               <p className="text-[10px] text-neutral-500 text-center font-mono">
-                Pre-filled note: "{current.note}"
+                Pre-filled note: &quot;{current.note}&quot;
               </p>
             </div>
           </div>
