@@ -8,6 +8,7 @@ import {
   createAlbum,
   getDirectUploadUrl,
   saveSiteConfig,
+  deleteAlbum,
 } from "@/app/admin/actions";
 import { processImageInBrowser, ProcessedPhoto } from "@/lib/clientImageProcessor";
 import {
@@ -22,6 +23,7 @@ import {
   CheckCircle2,
   Plus,
   Image as ImageIcon,
+  AlertTriangle,
 } from "lucide-react";
 
 export default function AdminStudioView() {
@@ -54,6 +56,10 @@ export default function AdminStudioView() {
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsSuccess, setSettingsSuccess] = useState(false);
 
+  // Album Deletion Confirmation State
+  const [albumToDelete, setAlbumToDelete] = useState<any | null>(null);
+  const [isDeletingAlbum, setIsDeletingAlbum] = useState(false);
+
   useEffect(() => {
     checkAdminAuth().then((auth) => {
       setIsAuthenticated(auth);
@@ -68,7 +74,7 @@ export default function AdminStudioView() {
     const baseUrl = process.env.NEXT_PUBLIC_R2_BASE_URL?.replace(/\/$/, "");
     try {
       const [albumsRes, configRes] = await Promise.all([
-        fetch(`${baseUrl}/albums.json`, { cache: "no-store" }),
+        fetch(`${baseUrl}/index.json`, { cache: "no-store" }),
         fetch(`${baseUrl}/site_config.json`, { cache: "no-store" }),
       ]);
 
@@ -211,6 +217,24 @@ export default function AdminStudioView() {
     } finally {
       setIsUploading(false);
       setUploadProgressText("");
+    }
+  };
+
+  const handleDeleteConfirmed = async () => {
+    if (!albumToDelete) return;
+    setIsDeletingAlbum(true);
+    try {
+      const res = await deleteAlbum(albumToDelete.id);
+      if (res.success) {
+        setAlbums((prev) => prev.filter((a) => a.id !== albumToDelete.id));
+        setAlbumToDelete(null);
+      } else {
+        alert(`Delete failed: ${res.error || "Unknown error"}`);
+      }
+    } catch (err: any) {
+      alert(`Delete error: ${err.message || String(err)}`);
+    } finally {
+      setIsDeletingAlbum(false);
     }
   };
 
@@ -491,13 +515,23 @@ export default function AdminStudioView() {
                           <p className="text-[11px] text-neutral-400">{album.category || "School Sports"} • {album.photo_count} photos</p>
                         </div>
                       </div>
-                      <Link
-                        href={`/admin/edit/${album.id}`}
-                        className="p-2 text-neutral-400 hover:text-white rounded-lg bg-neutral-800 hover:bg-neutral-700 transition"
-                        title="Edit Album"
-                      >
-                        <Edit size={14} />
-                      </Link>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <Link
+                          href={`/admin/edit/${album.id}`}
+                          className="p-2 text-neutral-400 hover:text-white rounded-lg bg-neutral-800 hover:bg-neutral-700 transition"
+                          title="Edit Album"
+                        >
+                          <Edit size={14} />
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={() => setAlbumToDelete(album)}
+                          className="p-2 text-neutral-400 hover:text-red-400 rounded-lg bg-neutral-800 hover:bg-neutral-700 transition cursor-pointer"
+                          title="Delete Album"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -626,6 +660,53 @@ export default function AdminStudioView() {
           </section>
         )}
       </main>
+
+      {/* ----------------- DELETE ALBUM CONFIRMATION DIALOG ----------------- */}
+      {albumToDelete && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => !isDeletingAlbum && setAlbumToDelete(null)}
+        >
+          <div
+            className="bg-neutral-900 border border-neutral-800 rounded-2xl max-w-md w-full p-6 space-y-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3.5">
+              <div className="p-3 bg-red-950/60 border border-red-800/80 text-red-400 rounded-xl shrink-0">
+                <AlertTriangle size={22} />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-bold text-white">Delete Album</h3>
+                <p className="text-xs text-neutral-400 leading-relaxed">
+                  Are you sure you want to permanently delete{" "}
+                  <span className="text-white font-semibold">"{albumToDelete.title}"</span>?
+                  This removes the album from the public directory.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setAlbumToDelete(null)}
+                disabled={isDeletingAlbum}
+                className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white rounded-lg text-xs font-semibold transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteConfirmed}
+                disabled={isDeletingAlbum}
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer"
+              >
+                {isDeletingAlbum && <Loader2 size={13} className="animate-spin" />}
+                {isDeletingAlbum ? "Deleting..." : "Delete Album"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

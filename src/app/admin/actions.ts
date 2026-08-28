@@ -1,6 +1,6 @@
 "use server";
 
-import { S3Client, PutObjectCommand, DeleteObjectsCommand } from "@aws-sdk/client-s3";
+import { S3Client, GetObjectCommand, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { cookies } from "next/headers";
 
@@ -260,6 +260,61 @@ export async function saveSiteConfig(config: any): Promise<{ success: boolean; e
         ContentType: "application/json",
       })
     );
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
+export async function deleteAlbum(albumId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const isAuth = await checkAdminAuth();
+    if (!isAuth) return { success: false, error: "Unauthorized" };
+
+    if (!BUCKET_NAME) return { success: false, error: "R2_BUCKET_NAME is not set." };
+
+    const r2 = getR2Client();
+
+    // 1. Fetch current index.json
+    let albums: any[] = [];
+    try {
+      const indexObj = await r2.send(
+        new GetObjectCommand({
+          Bucket: BUCKET_NAME,
+          Key: "index.json",
+        })
+      );
+      const str = await indexObj.Body?.transformToString();
+      if (str) albums = JSON.parse(str);
+    } catch {
+      // index.json may be missing or empty
+    }
+
+    // 2. Filter out the deleted album
+    const updatedAlbums = albums.filter((a: any) => a.id !== albumId);
+
+    // 3. Save updated index.json back to R2
+    await r2.send(
+      new PutObjectCommand({
+        Bucket: BUCKET_NAME,
+        Key: "index.json",
+        Body: JSON.stringify(updatedAlbums, null, 2),
+        ContentType: "application/json",
+      })
+    );
+
+    // 4. Delete the album's manifest.json
+    try {
+      await r2.send(
+        new DeleteObjectCommand({
+          Bucket: BUCKET_NAME,
+          Key: `${albumId}/manifest.json`,
+        })
+      );
+    } catch (e) {
+      console.warn("Could not delete manifest.json:", e);
+    }
 
     return { success: true };
   } catch (err: any) {
