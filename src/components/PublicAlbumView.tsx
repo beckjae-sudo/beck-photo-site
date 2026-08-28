@@ -103,8 +103,30 @@ export default function PublicAlbumView() {
     return () => clearTimeout(timer);
   }, [showDownloadToast]);
 
-  const triggerDownloadNotice = () => {
+  // Silent Background Downloader
+  const handleDownload = async (e: React.MouseEvent, url: string, filename: string) => {
+    e.stopPropagation();
     setShowDownloadToast(true);
+
+    try {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = filename || "photo.jpg";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch {
+      // Direct download fallback
+      const link = document.createElement("a");
+      link.href = url;
+      link.target = "_blank";
+      link.download = filename || "photo.jpg";
+      link.click();
+    }
   };
 
   const openSupport = (fund: FundType = "gear") => {
@@ -176,7 +198,6 @@ export default function PublicAlbumView() {
           </Link>
 
           <div className="flex items-center gap-3">
-            {/* Header Support Trigger */}
             <button
               onClick={() => openSupport("gear")}
               className="flex items-center gap-1.5 text-xs font-mono text-neutral-300 hover:text-white transition py-1.5 px-3 rounded-lg bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 cursor-pointer shadow-sm"
@@ -227,18 +248,14 @@ export default function PublicAlbumView() {
                 <span className="p-2 rounded-full bg-black/60 text-white backdrop-blur-md">
                   <Maximize2 size={16} />
                 </span>
-                <a
-                  href={photo.urls.original}
-                  download
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    triggerDownloadNotice();
-                  }}
-                  className="p-2 rounded-full bg-black/60 text-white hover:text-blue-400 backdrop-blur-md transition"
+                <button
+                  type="button"
+                  onClick={(e) => handleDownload(e, photo.urls.original, photo.original_filename)}
+                  className="p-2 rounded-full bg-black/60 text-white hover:text-blue-400 backdrop-blur-md transition cursor-pointer"
                   title="Download High-Res Original"
                 >
                   <Download size={16} />
-                </a>
+                </button>
               </div>
             </div>
           ))}
@@ -256,20 +273,16 @@ export default function PublicAlbumView() {
             <span className="text-xs font-mono font-medium text-neutral-400 bg-white/5 px-2.5 py-1.5 rounded-lg border border-white/10">
               {selectedIndex + 1} / {photos.length}
             </span>
-            <a
-              href={selectedPhoto.urls.original}
-              download
-              onClick={(e) => {
-                e.stopPropagation();
-                triggerDownloadNotice();
-              }}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur-md transition"
+            <button
+              type="button"
+              onClick={(e) => handleDownload(e, selectedPhoto.urls.original, selectedPhoto.original_filename)}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur-md transition cursor-pointer"
             >
               <Download size={14} /> Download Original
-            </a>
+            </button>
             <button
               onClick={() => setSelectedIndex(null)}
-              className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-neutral-300 hover:text-white backdrop-blur-md transition"
+              className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-neutral-300 hover:text-white backdrop-blur-md transition cursor-pointer"
             >
               <X size={20} />
             </button>
@@ -282,7 +295,7 @@ export default function PublicAlbumView() {
                 e.stopPropagation();
                 showPrev();
               }}
-              className="absolute left-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-md transition z-50"
+              className="absolute left-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-md transition z-50 cursor-pointer"
               title="Previous Photo (Left Arrow)"
             >
               <ChevronLeft size={28} />
@@ -304,7 +317,7 @@ export default function PublicAlbumView() {
                 e.stopPropagation();
                 showNext();
               }}
-              className="absolute right-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-md transition z-50"
+              className="absolute right-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-md transition z-50 cursor-pointer"
               title="Next Photo (Right Arrow)"
             >
               <ChevronRight size={28} />
@@ -313,9 +326,9 @@ export default function PublicAlbumView() {
         </div>
       )}
 
-      {/* ----------------- GENTLE POST-DOWNLOAD TOAST ----------------- */}
+      {/* ----------------- GENTLE POST-DOWNLOAD TOAST (z-[70] for priority over lightbox) ----------------- */}
       {showDownloadToast && (
-        <div className="fixed bottom-6 right-6 z-50 max-w-sm w-[calc(100vw-3rem)] p-4 rounded-xl bg-neutral-900/95 backdrop-blur-md border border-neutral-700/80 text-white shadow-2xl flex flex-col gap-2.5 animate-in fade-in slide-in-from-bottom-4 duration-300">
+        <div className="fixed bottom-6 right-6 z-[70] max-w-sm w-[calc(100vw-3rem)] p-4 rounded-xl bg-neutral-900/95 backdrop-blur-md border border-neutral-700/80 text-white shadow-2xl flex flex-col gap-2.5 animate-in fade-in slide-in-from-bottom-4 duration-300">
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
@@ -325,7 +338,7 @@ export default function PublicAlbumView() {
             </div>
             <button
               onClick={() => setShowDownloadToast(false)}
-              className="text-neutral-400 hover:text-white transition p-0.5"
+              className="text-neutral-400 hover:text-white transition p-0.5 cursor-pointer"
             >
               <X size={14} />
             </button>
