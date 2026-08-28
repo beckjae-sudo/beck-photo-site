@@ -282,29 +282,29 @@ export async function deleteAlbum(albumId: string): Promise<{ success: boolean; 
 
     const r2 = getR2Client();
 
-    // 1. Fetch current index.json
+    // 1. Fetch current albums.json
     let albums: any[] = [];
     try {
       const indexObj = await r2.send(
         new GetObjectCommand({
           Bucket: BUCKET_NAME,
-          Key: "index.json",
+          Key: "albums.json",
         })
       );
       const str = await indexObj.Body?.transformToString();
       if (str) albums = JSON.parse(str);
     } catch {
-      // index.json may be missing or empty
+      // albums.json may be missing or empty
     }
 
     // 2. Filter out the deleted album
     const updatedAlbums = albums.filter((a: any) => a.id !== albumId);
 
-    // 3. Save updated index.json back to R2
+    // 3. Save updated albums.json back to R2
     await r2.send(
       new PutObjectCommand({
         Bucket: BUCKET_NAME,
-        Key: "index.json",
+        Key: "albums.json",
         Body: JSON.stringify(updatedAlbums, null, 2),
         ContentType: "application/json",
       })

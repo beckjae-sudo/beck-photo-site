@@ -74,7 +74,7 @@ export default function AdminStudioView() {
     const baseUrl = process.env.NEXT_PUBLIC_R2_BASE_URL?.replace(/\/$/, "");
     try {
       const [albumsRes, configRes] = await Promise.all([
-        fetch(`${baseUrl}/index.json`, { cache: "no-store" }),
+        fetch(`${baseUrl}/albums.json`, { cache: "no-store" }),
         fetch(`${baseUrl}/site_config.json`, { cache: "no-store" }),
       ]);
 
