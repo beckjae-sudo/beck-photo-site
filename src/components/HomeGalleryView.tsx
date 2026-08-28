@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Folder, Calendar, Layers, Sparkles, ArrowRight } from "lucide-react";
+import { Folder, Calendar, Layers, Sparkles, ArrowRight, Coffee } from "lucide-react";
+import SupportModal, { FundType } from "@/components/SupportModal";
 
 export interface AlbumSummary {
   id: string;
@@ -87,6 +88,10 @@ export default function HomeGalleryView({
   const [currentCoverIndex, setCurrentCoverIndex] = useState(0);
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
 
+  // Support Modal State
+  const [isSupportOpen, setIsSupportOpen] = useState(false);
+  const [supportFund, setSupportFund] = useState<FundType>("gear");
+
   const coverPhotos = albums
     .filter((a) => Boolean(a.cover_url))
     .map((a) => getHighResCoverUrl(a.cover_url));
@@ -108,6 +113,11 @@ export default function HomeGalleryView({
     selectedCategory === "All"
       ? albums
       : albums.filter((album) => (album.category || "School Sports") === selectedCategory);
+
+  const openSupport = (fund: FundType = "gear") => {
+    setSupportFund(fund);
+    setIsSupportOpen(true);
+  };
 
   return (
     <div className="relative min-h-screen bg-black text-neutral-100 overflow-x-hidden select-none">
@@ -168,7 +178,6 @@ export default function HomeGalleryView({
 
             {/* Actions & Social Showcase */}
             <div className="flex flex-col items-center gap-4">
-              {/* Apple-Style Frosted Liquid Glass Button */}
               <button
                 onClick={() => setShowSplash(false)}
                 className="group relative flex items-center gap-3 px-8 py-3.5 rounded-full bg-white/10 hover:bg-white/20 active:bg-white/25 text-white text-xs font-semibold tracking-widest uppercase backdrop-blur-xl border border-white/25 hover:border-white/40 shadow-[0_8px_32px_0_rgba(0,0,0,0.5),inset_0_1px_1px_0_rgba(255,255,255,0.4)] transition-all duration-300 hover:scale-105 active:scale-95 cursor-pointer"
@@ -177,7 +186,6 @@ export default function HomeGalleryView({
                 <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform text-blue-400" />
               </button>
 
-              {/* Jaden Beck Instagram Feature Pill */}
               <a
                 href={INSTAGRAM_URL}
                 target="_blank"
@@ -218,20 +226,31 @@ export default function HomeGalleryView({
                 <span>PHOTO</span>
               </button>
 
-              <div className="flex items-center gap-4">
-                {/* Subtle Social Link */}
+              <div className="flex items-center gap-3">
+                {/* Support Pill Button */}
+                <button
+                  onClick={() => openSupport("gear")}
+                  className="flex items-center gap-1.5 text-xs font-mono text-neutral-300 hover:text-white transition py-1.5 px-3 rounded-lg bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 cursor-pointer shadow-sm"
+                  title="Sideline Support & Gear Funds"
+                >
+                  <Coffee size={12} className="text-amber-400" />
+                  <span className="hidden sm:inline">SUPPORT // FUNDS</span>
+                  <span className="sm:hidden">SUPPORT</span>
+                </button>
+
+                {/* Subtle Instagram Link */}
                 <a
                   href={INSTAGRAM_URL}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="hidden sm:flex items-center gap-1.5 text-xs font-mono text-neutral-400 hover:text-white transition py-1 px-2.5 rounded-lg hover:bg-neutral-900 border border-transparent hover:border-neutral-800"
+                  className="hidden md:flex items-center gap-1.5 text-xs font-mono text-neutral-400 hover:text-white transition py-1.5 px-2.5 rounded-lg hover:bg-neutral-900 border border-transparent hover:border-neutral-800"
                   title="Follow Jaden Beck on Instagram"
                 >
                   <InstagramIcon size={12} className="text-neutral-400" />
                   <span>@{INSTAGRAM_HANDLE}</span>
                 </a>
 
-                <span className="text-xs font-mono text-neutral-500">
+                <span className="text-xs font-mono text-neutral-500 pl-1">
                   {albums.length} GALLERIES
                 </span>
               </div>
@@ -340,6 +359,13 @@ export default function HomeGalleryView({
               <span>BECK / PHOTO © {new Date().getFullYear()}</span>
             </div>
             <div className="flex items-center gap-6">
+              <button
+                onClick={() => openSupport("gear")}
+                className="hover:text-neutral-300 transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Coffee size={13} className="text-amber-400" />
+                <span>SUPPORT // FUNDS</span>
+              </button>
               <a
                 href={INSTAGRAM_URL}
                 target="_blank"
@@ -353,6 +379,13 @@ export default function HomeGalleryView({
           </div>
         </footer>
       </div>
+
+      {/* ----------------- SUPPORT MODAL ----------------- */}
+      <SupportModal
+        isOpen={isSupportOpen}
+        onClose={() => setIsSupportOpen(false)}
+        defaultFund={supportFund}
+      />
     </div>
   );
 }
