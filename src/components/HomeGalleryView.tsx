@@ -184,7 +184,7 @@ export default function HomeGalleryView({
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-black/50 hover:bg-black/80 backdrop-blur-md border border-white/15 hover:border-white/30 text-[11px] text-neutral-300 hover:text-white transition-all duration-300 hover:scale-[1.02] shadow-lg group"
               >
-                <Instagram size={13} className="text-pink-400 group-hover:scale-110 transition-transform" />
+                <InstagramIcon size={13} className="text-pink-400 group-hover:scale-110 transition-transform" />
                 <span>
                   Follow more of Jaden Beck&apos;s work{" "}
                   <span className="font-semibold text-white group-hover:underline">@{INSTAGRAM_HANDLE}</span>
@@ -227,7 +227,7 @@ export default function HomeGalleryView({
                   className="hidden sm:flex items-center gap-1.5 text-xs font-mono text-neutral-400 hover:text-white transition py-1 px-2.5 rounded-lg hover:bg-neutral-900 border border-transparent hover:border-neutral-800"
                   title="Follow Jaden Beck on Instagram"
                 >
-                  <Instagram size={12} className="text-neutral-400" />
+                  <InstagramIcon size={12} className="text-neutral-400" />
                   <span>@{INSTAGRAM_HANDLE}</span>
                 </a>
 
@@ -346,7 +346,7 @@ export default function HomeGalleryView({
                 rel="noopener noreferrer"
                 className="hover:text-neutral-300 transition flex items-center gap-1.5"
               >
-                <Instagram size={13} />
+                <InstagramIcon size={13} />
                 <span>@{INSTAGRAM_HANDLE}</span>
               </a>
             </div>
