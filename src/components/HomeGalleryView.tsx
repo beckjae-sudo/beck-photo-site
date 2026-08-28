@@ -121,22 +121,23 @@ export default function HomeGalleryView({
 
   return (
     <div className="relative min-h-screen bg-black text-neutral-100 overflow-x-hidden select-none">
-      {/* ----------------- SPLASH SCREEN OVERLAY ----------------- */}
+      {/* ----------------- ULTRA-CRISP SPLASH SCREEN OVERLAY ----------------- */}
       {showSplash && (
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-between p-8 md:p-14 bg-black overflow-hidden">
-          {/* Background Rotating Images with Cross-Fade */}
+          {/* Background Rotating Images with Clean Cross-Fade (No GPU blur/scaling) */}
           {coverPhotos.length > 0 ? (
             coverPhotos.map((url, idx) => (
               <div
                 key={url}
                 className={`absolute inset-0 transition-opacity duration-1000 ease-in-out ${
-                  idx === currentCoverIndex ? "opacity-60 scale-100" : "opacity-0 scale-105"
-                } transition-transform duration-[7000ms]`}
+                  idx === currentCoverIndex ? "opacity-80" : "opacity-0 pointer-events-none"
+                }`}
               >
                 <img
                   src={url}
                   alt="Gallery Feature"
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-cover object-center"
+                  loading={idx === 0 ? "eager" : "lazy"}
                 />
               </div>
             ))
@@ -144,12 +145,12 @@ export default function HomeGalleryView({
             <div className="absolute inset-0 bg-gradient-to-br from-neutral-950 via-black to-neutral-900 opacity-90" />
           )}
 
-          {/* Vignette & Contrast Overlays */}
+          {/* Crisp Contrast & Vignette Overlays (No backdrop-blur) */}
           <div className="absolute inset-0 bg-radial from-transparent via-black/40 to-black/90 pointer-events-none" />
-          <div className="absolute inset-0 bg-black/25 backdrop-blur-[0.5px] pointer-events-none" />
+          <div className="absolute inset-0 bg-black/30 pointer-events-none" />
 
           {/* Top Bar */}
-          <div className="relative z-10 w-full flex justify-between items-center max-w-7xl mx-auto text-[11px] font-mono tracking-[0.25em] text-neutral-400 uppercase">
+          <div className="relative z-10 w-full flex justify-between items-center max-w-7xl mx-auto text-[11px] font-mono tracking-[0.25em] text-neutral-300 uppercase drop-shadow-md">
             <span className="flex items-center gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
               ARCHIVE / VOL. 01
@@ -171,7 +172,7 @@ export default function HomeGalleryView({
                   PHOTO
                 </span>
               </h1>
-              <p className="text-[11px] sm:text-xs uppercase tracking-[0.45em] text-neutral-300 font-mono font-medium">
+              <p className="text-[11px] sm:text-xs uppercase tracking-[0.45em] text-neutral-200 font-mono font-medium drop-shadow-md">
                 Action & High-Resolution Athletics
               </p>
             </div>
@@ -190,7 +191,7 @@ export default function HomeGalleryView({
                 href={INSTAGRAM_URL}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-black/50 hover:bg-black/80 backdrop-blur-md border border-white/15 hover:border-white/30 text-[11px] text-neutral-300 hover:text-white transition-all duration-300 hover:scale-[1.02] shadow-lg group"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-md border border-white/20 hover:border-white/35 text-[11px] text-neutral-200 hover:text-white transition-all duration-300 hover:scale-[1.02] shadow-lg group"
               >
                 <InstagramIcon size={13} className="text-pink-400 group-hover:scale-110 transition-transform" />
                 <span>
@@ -202,7 +203,7 @@ export default function HomeGalleryView({
           </div>
 
           {/* Bottom Bar */}
-          <div className="relative z-10 text-[10px] text-neutral-400 font-mono tracking-[0.2em] uppercase">
+          <div className="relative z-10 text-[10px] text-neutral-400 font-mono tracking-[0.2em] uppercase drop-shadow-md">
             Direct Cloudflare R2 Delivery
           </div>
         </div>
@@ -227,7 +228,6 @@ export default function HomeGalleryView({
               </button>
 
               <div className="flex items-center gap-3">
-                {/* Support Pill Button */}
                 <button
                   onClick={() => openSupport("gear")}
                   className="flex items-center gap-1.5 text-xs font-mono text-neutral-300 hover:text-white transition py-1.5 px-3 rounded-lg bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 cursor-pointer shadow-sm"
@@ -238,7 +238,6 @@ export default function HomeGalleryView({
                   <span className="sm:hidden">SUPPORT</span>
                 </button>
 
-                {/* Subtle Instagram Link */}
                 <a
                   href={INSTAGRAM_URL}
                   target="_blank"
@@ -380,7 +379,7 @@ export default function HomeGalleryView({
         </footer>
       </div>
 
-      {/* ----------------- SUPPORT MODAL ----------------- */}
+      {/* Support Modal */}
       <SupportModal
         isOpen={isSupportOpen}
         onClose={() => setIsSupportOpen(false)}
