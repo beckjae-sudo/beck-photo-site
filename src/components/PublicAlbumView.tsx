@@ -13,8 +13,11 @@ import {
   Loader2,
   Maximize2,
   X,
-  AlertCircle
+  AlertCircle,
+  Coffee,
+  ArrowRight,
 } from "lucide-react";
+import SupportModal, { FundType } from "@/components/SupportModal";
 
 interface Photo {
   id: string;
@@ -47,6 +50,11 @@ export default function PublicAlbumView() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+
+  // Support Modal & Download Toast States
+  const [isSupportOpen, setIsSupportOpen] = useState(false);
+  const [supportFund, setSupportFund] = useState<FundType>("gear");
+  const [showDownloadToast, setShowDownloadToast] = useState(false);
 
   useEffect(() => {
     if (!albumId) return;
@@ -86,6 +94,24 @@ export default function PublicAlbumView() {
     loadAlbum();
   }, [albumId]);
 
+  // Handle Download Toast Auto-Dismiss
+  useEffect(() => {
+    if (!showDownloadToast) return;
+    const timer = setTimeout(() => {
+      setShowDownloadToast(false);
+    }, 6000);
+    return () => clearTimeout(timer);
+  }, [showDownloadToast]);
+
+  const triggerDownloadNotice = () => {
+    setShowDownloadToast(true);
+  };
+
+  const openSupport = (fund: FundType = "gear") => {
+    setSupportFund(fund);
+    setIsSupportOpen(true);
+  };
+
   const photos = album?.photos || [];
   const selectedPhoto = selectedIndex !== null ? photos[selectedIndex] : null;
 
@@ -117,7 +143,7 @@ export default function PublicAlbumView() {
     return (
       <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center text-white gap-3">
         <Loader2 size={32} className="animate-spin text-blue-500" />
-        <p className="text-sm text-neutral-400">Loading gallery...</p>
+        <p className="text-sm text-neutral-400 font-mono">Loading gallery archive...</p>
       </div>
     );
   }
@@ -139,7 +165,7 @@ export default function PublicAlbumView() {
   }
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 pb-20">
+    <div className="min-h-screen bg-neutral-950 text-neutral-100 pb-20 relative select-none">
       <header className="border-b border-neutral-800/80 sticky top-0 z-30 bg-neutral-950/80 backdrop-blur-md">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <Link
@@ -148,22 +174,36 @@ export default function PublicAlbumView() {
           >
             <ArrowLeft size={14} /> Back to Galleries
           </Link>
-          <span className="text-xs font-medium text-neutral-500 flex items-center gap-1">
-            <Layers size={12} /> {photos.length} photos
-          </span>
+
+          <div className="flex items-center gap-3">
+            {/* Header Support Trigger */}
+            <button
+              onClick={() => openSupport("gear")}
+              className="flex items-center gap-1.5 text-xs font-mono text-neutral-300 hover:text-white transition py-1.5 px-3 rounded-lg bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 cursor-pointer shadow-sm"
+              title="Sideline Support & Gear Funds"
+            >
+              <Coffee size={12} className="text-amber-400" />
+              <span className="hidden sm:inline">SUPPORT // FUNDS</span>
+              <span className="sm:hidden">SUPPORT</span>
+            </button>
+
+            <span className="text-xs font-mono text-neutral-500 flex items-center gap-1 pl-1">
+              <Layers size={12} /> {photos.length} photos
+            </span>
+          </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-6 pt-10 space-y-8">
         <div className="space-y-2">
           {album.category && (
-            <span className="text-xs font-semibold uppercase tracking-wider text-blue-400">
+            <span className="text-xs font-semibold uppercase tracking-wider text-blue-400 font-mono">
               {album.category}
             </span>
           )}
           <h1 className="text-3xl md:text-4xl font-extrabold text-white">{album.title}</h1>
           {album.date && (
-            <div className="flex items-center gap-1.5 text-xs text-neutral-400">
+            <div className="flex items-center gap-1.5 text-xs text-neutral-400 font-mono">
               <Calendar size={13} />
               <span>{album.date}</span>
             </div>
@@ -190,7 +230,10 @@ export default function PublicAlbumView() {
                 <a
                   href={photo.urls.original}
                   download
-                  onClick={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    triggerDownloadNotice();
+                  }}
                   className="p-2 rounded-full bg-black/60 text-white hover:text-blue-400 backdrop-blur-md transition"
                   title="Download High-Res Original"
                 >
@@ -210,14 +253,17 @@ export default function PublicAlbumView() {
         >
           {/* Top Bar: Counter, Download, Close */}
           <div className="absolute top-4 right-4 flex items-center gap-3 z-50">
-            <span className="text-xs font-medium text-neutral-400 bg-white/5 px-2.5 py-1 rounded-md border border-white/10">
+            <span className="text-xs font-mono font-medium text-neutral-400 bg-white/5 px-2.5 py-1.5 rounded-lg border border-white/10">
               {selectedIndex + 1} / {photos.length}
             </span>
             <a
               href={selectedPhoto.urls.original}
               download
-              onClick={(e) => e.stopPropagation()}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur-md transition"
+              onClick={(e) => {
+                e.stopPropagation();
+                triggerDownloadNotice();
+              }}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur-md transition"
             >
               <Download size={14} /> Download Original
             </a>
@@ -266,6 +312,50 @@ export default function PublicAlbumView() {
           )}
         </div>
       )}
+
+      {/* ----------------- GENTLE POST-DOWNLOAD TOAST ----------------- */}
+      {showDownloadToast && (
+        <div className="fixed bottom-6 right-6 z-50 max-w-sm w-[calc(100vw-3rem)] p-4 rounded-xl bg-neutral-900/95 backdrop-blur-md border border-neutral-700/80 text-white shadow-2xl flex flex-col gap-2.5 animate-in fade-in slide-in-from-bottom-4 duration-300">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-xs font-bold font-mono uppercase tracking-wider text-neutral-200">
+                Full-Res Download
+              </span>
+            </div>
+            <button
+              onClick={() => setShowDownloadToast(false)}
+              className="text-neutral-400 hover:text-white transition p-0.5"
+            >
+              <X size={14} />
+            </button>
+          </div>
+
+          <p className="text-xs text-neutral-300 leading-relaxed font-sans">
+            Downloaded high-res! Love the shots? Consider supporting the gear &amp; storage fund.
+          </p>
+
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <button
+              onClick={() => {
+                setShowDownloadToast(false);
+                openSupport("gear");
+              }}
+              className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition flex items-center gap-1.5 shadow-md shadow-blue-950/40 cursor-pointer"
+            >
+              <span>View Gear Fund</span>
+              <ArrowRight size={13} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ----------------- SUPPORT MODAL ----------------- */}
+      <SupportModal
+        isOpen={isSupportOpen}
+        onClose={() => setIsSupportOpen(false)}
+        defaultFund={supportFund}
+      />
     </div>
   );
 }
