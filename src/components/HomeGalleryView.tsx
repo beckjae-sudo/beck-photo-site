@@ -274,7 +274,7 @@ export default function HomeGalleryView({
             className="pointer-events-none fixed inset-0 z-0 overflow-hidden select-none transition-opacity duration-300"
             style={{ opacity: mosaicOpacity / 100 }}
           >
-            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2.5 sm:gap-3.5 p-3 -rotate-1 scale-105 filter saturate-75 contrast-110">
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-1 sm:gap-1.5 p-1 -rotate-1 scale-105 filter saturate-75 contrast-110">
               {randomizedMosaicPhotos.map((item, idx) => (
                 <div
                   key={`${item.url}-${idx}`}

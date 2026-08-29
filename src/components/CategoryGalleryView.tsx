@@ -16,6 +16,7 @@ export interface AlbumSummary {
   photo_count: number;
   cover_url: string;
   focal_point?: string;
+  photos_pool?: string[];
 }
 
 interface CategoryGalleryViewProps {
@@ -33,23 +34,6 @@ export default function CategoryGalleryView({
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [supportFund, setSupportFund] = useState<FundType>("gear");
-
-  // Sport-specific randomized mosaic backdrop
-  const sportMosaicPhotos = useMemo(() => {
-    const rawCovers = albums
-      .filter((a) => Boolean(a.cover_url))
-      .map((a) => ({
-        url: a.cover_url,
-        focal_point: a.focal_point,
-      }));
-    if (rawCovers.length === 0) return [];
-
-    let tiles = shuffleArray(rawCovers);
-    while (tiles.length < 24) {
-      tiles = [...tiles, ...shuffleArray(rawCovers)];
-    }
-    return tiles.slice(0, 24);
-  }, [albums]);
 
   const subCategories = useMemo(() => {
     const set = new Set<string>();
@@ -80,6 +64,25 @@ export default function CategoryGalleryView({
     });
   }, [albums, selectedSubCategory]);
 
+  // Pool all photos from active subcategory albums with Fisher-Yates shuffle
+  const sportMosaicPhotos = useMemo(() => {
+    const pool: string[] = [];
+    filteredAlbums.forEach((a) => {
+      if (a.photos_pool && a.photos_pool.length > 0) {
+        pool.push(...a.photos_pool);
+      } else if (a.cover_url) {
+        pool.push(a.cover_url);
+      }
+    });
+
+    if (pool.length === 0) return [];
+    let tiles = shuffleArray(pool);
+    while (tiles.length < 24) {
+      tiles = [...tiles, ...shuffleArray(pool)];
+    }
+    return tiles.slice(0, 24);
+  }, [filteredAlbums]);
+
   const getSubCategoryCover = (subCat: string) => {
     if (subCat === "All") return albums[0]?.cover_url || "";
     const match = albums.find((a) => {
@@ -100,14 +103,14 @@ export default function CategoryGalleryView({
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 pb-20 relative select-none overflow-hidden">
-      {/* Sport-Specific Randomized Mosaic Backdrop */}
+      {/* Tight-Gap Sport Mosaic Backdrop */}
       {sportMosaicPhotos.length > 0 && (
         <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden opacity-30 select-none">
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2.5 sm:gap-3.5 p-3 -rotate-1 scale-105 filter saturate-75 contrast-110">
-            {sportMosaicPhotos.map((item, idx) => (
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-1 sm:gap-1.5 p-1 -rotate-1 scale-105 filter saturate-75 contrast-110">
+            {sportMosaicPhotos.map((url, idx) => (
               <div
-                key={`${item.url}-${idx}`}
-                className={`rounded-xl overflow-hidden bg-neutral-900 border border-white/5 ${
+                key={`${url}-${idx}`}
+                className={`rounded-md overflow-hidden bg-neutral-900 ${
                   idx % 3 === 0
                     ? "aspect-4/3"
                     : idx % 2 === 0
@@ -116,10 +119,10 @@ export default function CategoryGalleryView({
                 }`}
               >
                 <img
-                  src={item.url}
+                  src={url}
                   alt=""
                   className="w-full h-full object-cover"
-                  style={getFocalPointStyle(item.focal_point)}
+                  style={getFocalPointStyle()}
                 />
               </div>
             ))}
@@ -127,7 +130,7 @@ export default function CategoryGalleryView({
         </div>
       )}
 
-      {/* Layered Vignette */}
+      {/* Vignette Layer */}
       <div className="pointer-events-none fixed inset-0 z-0 bg-radial from-transparent via-neutral-950/50 to-neutral-950" />
       <div className="pointer-events-none fixed inset-0 z-0 bg-gradient-to-t from-neutral-950 via-neutral-950/60 to-neutral-950/80" />
 
