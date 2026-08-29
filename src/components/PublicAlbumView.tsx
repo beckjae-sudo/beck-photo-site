@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import JSZip from "jszip";
 import {
   ArrowLeft,
   ChevronLeft,
@@ -18,6 +19,10 @@ import {
   Coffee,
   ArrowRight,
   Share2,
+  Heart,
+  CheckSquare,
+  Square,
+  Package,
 } from "lucide-react";
 import SupportModal, { FundType } from "@/components/SupportModal";
 import ShareModal from "@/components/ShareModal";
@@ -57,6 +62,11 @@ export default function PublicAlbumView() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+
+  // Favorites & Selection State
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isZipping, setIsZipping] = useState(false);
+  const [zipProgress, setZipProgress] = useState({ current: 0, total: 0, percent: 0 });
 
   // Fullscreen, Touch & Swipe Gesture State
   const [isImmersive, setIsImmersive] = useState(false);
@@ -134,6 +144,97 @@ export default function PublicAlbumView() {
     }, 6000);
     return () => clearTimeout(timer);
   }, [showDownloadToast]);
+
+  const toggleFavorite = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (!album) return;
+    if (selectedIds.size === album.photos.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(album.photos.map((p) => p.id)));
+    }
+  };
+
+  // Batch ZIP Export Generator (Concurrent chunks with progress tracking)
+  const handleDownloadBatch = async (photosToDownload?: Photo[]) => {
+    if (!album) return;
+    const targetPhotos = photosToDownload || album.photos.filter((p) => selectedIds.has(p.id));
+    if (targetPhotos.length === 0) return;
+
+    setIsZipping(true);
+    setZipProgress({ current: 0, total: targetPhotos.length, percent: 0 });
+
+    try {
+      const zip = new JSZip();
+      const folderName = `${album.title.replace(/[^a-z0-9_-]/gi, "_")}_HighRes`;
+      const folder = zip.folder(folderName) || zip;
+
+      const CONCURRENCY = 3;
+      let completed = 0;
+
+      for (let i = 0; i < targetPhotos.length; i += CONCURRENCY) {
+        const chunk = targetPhotos.slice(i, i + CONCURRENCY);
+        await Promise.all(
+          chunk.map(async (photo, chunkIndex) => {
+            const indexNumber = i + chunkIndex + 1;
+            const ext = photo.original_filename.includes(".")
+              ? photo.original_filename.substring(photo.original_filename.lastIndexOf("."))
+              : ".jpg";
+            const fileName = `${String(indexNumber).padStart(3, "0")}_${photo.original_filename || `photo_${photo.id}${ext}`}`;
+
+            try {
+              const res = await fetch(photo.urls.original);
+              if (!res.ok) throw new Error("Failed to fetch original");
+              const blob = await res.blob();
+              folder.file(fileName, blob);
+            } catch {
+              // Fallback to display version if original fetch is blocked
+              const fallbackRes = await fetch(photo.urls.display);
+              const fallbackBlob = await fallbackRes.blob();
+              folder.file(fileName.replace(/\.[^.]+$/, ".webp"), fallbackBlob);
+            }
+
+            completed++;
+            const percent = Math.round((completed / targetPhotos.length) * 100);
+            setZipProgress({ current: completed, total: targetPhotos.length, percent });
+          })
+        );
+      }
+
+      const zipBlob = await zip.generateAsync({
+        type: "blob",
+        compression: "STORE", // Already compressed JPEGs/WebP; store saves browser CPU time
+      });
+
+      const blobUrl = window.URL.createObjectURL(zipBlob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = `${folderName}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+
+      setShowDownloadToast(true);
+    } catch (err: any) {
+      alert(`Download failed: ${err.message || "Network error"}`);
+    } finally {
+      setIsZipping(false);
+      setZipProgress({ current: 0, total: 0, percent: 0 });
+    }
+  };
 
   const triggerCue = (type: "both" | "left" | "right", duration: number) => {
     if (cueTimeoutRef.current) clearTimeout(cueTimeoutRef.current);
@@ -218,7 +319,7 @@ export default function PublicAlbumView() {
   const photos = album?.photos || [];
   const selectedPhoto = selectedIndex !== null ? photos[selectedIndex] : null;
 
-  // Background Image Preloader (Zero-Lag Next/Prev Navigation)
+  // Background Image Preloader
   useEffect(() => {
     if (selectedIndex === null || photos.length === 0) return;
     const indicesToPreload = [
@@ -256,7 +357,7 @@ export default function PublicAlbumView() {
     triggerCue("right", 500);
   };
 
-  // ----------------- ADVANCED TOUCH SWIPE GESTURE HANDLERS -----------------
+  // Touch Swipe Handlers
   const handleTouchStart = (e: React.TouchEvent) => {
     touchStartX.current = e.touches[0].clientX;
     touchStartY.current = e.touches[0].clientY;
@@ -270,7 +371,6 @@ export default function PublicAlbumView() {
     const deltaX = currentX - touchStartX.current;
     const deltaY = currentY - touchStartY.current;
 
-    // Track horizontal drag with soft resistance
     if (Math.abs(deltaX) > Math.abs(deltaY)) {
       setDragOffset(deltaX * 0.75);
     }
@@ -286,7 +386,6 @@ export default function PublicAlbumView() {
 
     setDragOffset(0);
 
-    // 1. Horizontal Swipe Detection (Threshold: > 45px)
     if (Math.abs(deltaX) > 45 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2) {
       if (deltaX < 0) {
         showNext();
@@ -298,7 +397,6 @@ export default function PublicAlbumView() {
       return;
     }
 
-    // 2. Vertical Downward Swipe Detection (Threshold: > 55px)
     if (deltaY > 55 && Math.abs(deltaY) > Math.abs(deltaX) * 1.4) {
       if (isImmersive) {
         setShowExitPrompt(true);
@@ -312,7 +410,6 @@ export default function PublicAlbumView() {
       return;
     }
 
-    // 3. Fallback to Tap Regions if no swipe gesture was dragged
     if (Math.abs(deltaX) < 12 && Math.abs(deltaY) < 12) {
       if (endX < screenWidth * 0.35) {
         handleFullscreenPrev();
@@ -373,7 +470,7 @@ export default function PublicAlbumView() {
   }
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 pb-20 relative select-none">
+    <div className="min-h-screen bg-neutral-950 text-neutral-100 pb-28 relative select-none">
       <header className="border-b border-neutral-800/80 sticky top-0 z-30 bg-neutral-950/80 backdrop-blur-md">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <Link
@@ -384,6 +481,17 @@ export default function PublicAlbumView() {
           </Link>
 
           <div className="flex items-center gap-2.5">
+            {/* Download Full Album Button */}
+            <button
+              onClick={() => handleDownloadBatch(album.photos)}
+              disabled={isZipping}
+              className="hidden sm:flex items-center gap-1.5 text-xs font-mono text-neutral-300 hover:text-white transition py-1.5 px-3 rounded-lg bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 cursor-pointer shadow-sm"
+              title="Download entire album as ZIP"
+            >
+              <Package size={12} className="text-emerald-400" />
+              <span>DOWNLOAD ALBUM (.ZIP)</span>
+            </button>
+
             <button
               onClick={handleShare}
               className="flex items-center gap-1.5 text-xs font-mono text-neutral-300 hover:text-white transition py-1.5 px-3 rounded-lg bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 cursor-pointer shadow-sm"
@@ -425,50 +533,114 @@ export default function PublicAlbumView() {
           <h1 className="text-3xl md:text-4xl font-extrabold text-white">{album.title}</h1>
 
           <div className="flex flex-wrap items-center justify-between gap-4 pt-1 border-b border-neutral-800/60 pb-4">
-            {album.date && (
-              <div className="flex items-center gap-1.5 text-xs text-neutral-400 font-mono">
-                <Calendar size={13} />
-                <span>{album.date}</span>
-              </div>
-            )}
+            <div className="flex items-center gap-4">
+              {album.date && (
+                <div className="flex items-center gap-1.5 text-xs text-neutral-400 font-mono">
+                  <Calendar size={13} />
+                  <span>{album.date}</span>
+                </div>
+              )}
+              {/* Quick Select All Toggle in Subheader */}
+              <button
+                onClick={handleSelectAll}
+                className="text-xs font-mono text-neutral-400 hover:text-white transition flex items-center gap-1.5 cursor-pointer"
+              >
+                {selectedIds.size === photos.length ? (
+                  <CheckSquare size={13} className="text-pink-400" />
+                ) : (
+                  <Square size={13} />
+                )}
+                <span>
+                  {selectedIds.size === photos.length ? "Deselect All" : "Select All for Download"}
+                </span>
+              </button>
+            </div>
 
-            {/* Mascot Avatar & Tap-to-Name Sideline Roster */}
             <ViewerPresenceBadge albumId={albumId} />
           </div>
         </div>
 
-        {/* Dynamic Aspect Ratio Masonry Grid */}
+        {/* Dynamic Aspect Ratio Masonry Grid with Favorite Hearts */}
         <div className="columns-2 sm:columns-3 md:columns-4 gap-4">
-          {photos.map((photo, idx) => (
-            <div
-              key={photo.id}
-              className="break-inside-avoid mb-4 group relative rounded-xl overflow-hidden bg-neutral-900 border border-neutral-800/90 hover:border-neutral-700 transition cursor-pointer"
-              onClick={() => setSelectedIndex(idx)}
-            >
-              <img
-                src={photo.urls.thumb}
-                alt={photo.original_filename}
-                className="w-full h-auto block object-cover group-hover:scale-[1.02] transition duration-300"
-                loading="lazy"
-                style={photo.aspect_ratio ? { aspectRatio: `${photo.aspect_ratio}` } : undefined}
-              />
-              <div className="hidden sm:flex absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-200 items-center justify-center gap-2">
-                <span className="p-2 rounded-full bg-black/60 text-white backdrop-blur-md">
-                  <Maximize2 size={16} />
-                </span>
+          {photos.map((photo, idx) => {
+            const isFav = selectedIds.has(photo.id);
+            return (
+              <div
+                key={photo.id}
+                className="break-inside-avoid mb-4 group relative rounded-xl overflow-hidden bg-neutral-900 border border-neutral-800/90 hover:border-neutral-700 transition cursor-pointer"
+                onClick={() => setSelectedIndex(idx)}
+              >
+                <img
+                  src={photo.urls.thumb}
+                  alt={photo.original_filename}
+                  className="w-full h-auto block object-cover group-hover:scale-[1.02] transition duration-300"
+                  loading="lazy"
+                  style={photo.aspect_ratio ? { aspectRatio: `${photo.aspect_ratio}` } : undefined}
+                />
+
+                {/* Persistent / Hover Heart Icon */}
                 <button
                   type="button"
-                  onClick={(e) => handleDownload(e, photo.urls.original, photo.original_filename)}
-                  className="p-2 rounded-full bg-black/60 text-white hover:text-blue-400 backdrop-blur-md transition cursor-pointer"
-                  title="Download High-Res Original"
+                  onClick={(e) => toggleFavorite(e, photo.id)}
+                  className={`absolute top-2 left-2 p-2 rounded-full backdrop-blur-md transition-all duration-200 z-10 cursor-pointer ${
+                    isFav
+                      ? "bg-pink-600 text-white shadow-lg shadow-pink-950/50 opacity-100 scale-100"
+                      : "bg-black/60 text-white/70 hover:text-white sm:opacity-0 sm:group-hover:opacity-100"
+                  }`}
+                  title={isFav ? "Remove from selected" : "Add to favorites / batch download"}
                 >
-                  <Download size={16} />
+                  <Heart size={14} fill={isFav ? "currentColor" : "none"} />
                 </button>
+
+                {/* Desktop Hover Overlay */}
+                <div className="hidden sm:flex absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-200 items-center justify-center gap-2 pointer-events-none">
+                  <span className="p-2 rounded-full bg-black/60 text-white backdrop-blur-md">
+                    <Maximize2 size={16} />
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => handleDownload(e, photo.urls.original, photo.original_filename)}
+                    className="p-2 rounded-full bg-black/60 text-white hover:text-blue-400 backdrop-blur-md transition cursor-pointer pointer-events-auto"
+                    title="Download High-Res Original"
+                  >
+                    <Download size={16} />
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </main>
+
+      {/* ----------------- FLOATING BATCH ACTIONS TRAY ----------------- */}
+      {selectedIds.size > 0 && (
+        <div className="fixed bottom-6 inset-x-0 mx-auto w-fit max-w-[92vw] z-40 animate-in fade-in slide-in-from-bottom-5 duration-200">
+          <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-neutral-900/95 border border-neutral-700/80 shadow-2xl backdrop-blur-xl text-white">
+            <div className="flex items-center gap-2 pr-2 border-r border-neutral-700">
+              <span className="flex items-center justify-center w-6 h-6 rounded-full bg-pink-600 text-xs font-bold font-mono">
+                {selectedIds.size}
+              </span>
+              <span className="text-xs font-medium hidden sm:inline">Selected</span>
+            </div>
+
+            <button
+              onClick={() => handleDownloadBatch()}
+              disabled={isZipping}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold shadow-lg shadow-blue-950/40 transition cursor-pointer"
+            >
+              <Download size={14} />
+              <span>Download Selected (.ZIP)</span>
+            </button>
+
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white text-xs font-semibold transition cursor-pointer"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ----------------- LIGHTBOX MODAL (STANDARD & FULLSCREEN) ----------------- */}
       {selectedPhoto !== null && selectedIndex !== null && (
@@ -481,14 +653,27 @@ export default function PublicAlbumView() {
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
         >
-          {/* STANDARD MODE CONTROLS */}
           {!isImmersive && (
             <>
-              {/* Top Bar */}
+              {/* Lightbox Controls */}
               <div className="absolute top-4 right-4 flex items-center gap-2.5 z-50">
                 <span className="text-xs font-mono font-medium text-neutral-400 bg-white/5 px-2.5 py-1.5 rounded-lg border border-white/10">
                   {selectedIndex + 1} / {photos.length}
                 </span>
+
+                {/* Favorite Toggle in Lightbox */}
+                <button
+                  type="button"
+                  onClick={(e) => toggleFavorite(e, selectedPhoto.id)}
+                  className={`p-1.5 rounded-lg backdrop-blur-md transition cursor-pointer ${
+                    selectedIds.has(selectedPhoto.id)
+                      ? "bg-pink-600 text-white"
+                      : "bg-white/10 hover:bg-white/20 text-neutral-300 hover:text-white"
+                  }`}
+                  title="Favorite / Add to selection"
+                >
+                  <Heart size={16} fill={selectedIds.has(selectedPhoto.id) ? "currentColor" : "none"} />
+                </button>
 
                 <button
                   type="button"
@@ -523,7 +708,7 @@ export default function PublicAlbumView() {
                 </button>
               </div>
 
-              {/* Desktop Previous / Next Buttons */}
+              {/* Desktop Prev/Next Buttons */}
               {photos.length > 1 && (
                 <>
                   <button
@@ -549,7 +734,7 @@ export default function PublicAlbumView() {
                 </>
               )}
 
-              {/* Standard View Photo with Active Swipe Tracking */}
+              {/* Standard Photo Display with Swipe Tracking */}
               <div
                 className="max-h-[85vh] max-w-[85vw] flex items-center justify-center transition-transform ease-out duration-150"
                 style={{
@@ -566,7 +751,7 @@ export default function PublicAlbumView() {
             </>
           )}
 
-          {/* ----------------- FULLSCREEN IMMERSIVE MODE ----------------- */}
+          {/* Fullscreen Mode */}
           {isImmersive && (
             <div
               className="relative w-full h-full flex items-center justify-center transition-transform ease-out duration-150"
@@ -575,14 +760,12 @@ export default function PublicAlbumView() {
               }}
               onClick={(e) => e.stopPropagation()}
             >
-              {/* Fullscreen Photo */}
               <img
                 src={selectedPhoto.urls.display}
                 alt={selectedPhoto.original_filename}
                 className="w-full h-full object-contain pointer-events-none select-none"
               />
 
-              {/* Faint Visual Chevrons */}
               <div
                 className={`pointer-events-none absolute left-4 sm:left-8 top-1/2 -translate-y-1/2 transition-opacity duration-300 z-30 ${
                   navCue === "both" || navCue === "left" ? "opacity-35" : "opacity-0"
@@ -599,7 +782,6 @@ export default function PublicAlbumView() {
                 <ChevronRight className="w-12 h-12 sm:w-16 sm:h-16 text-white stroke-[2.5]" />
               </div>
 
-              {/* Swipe-Down Exit Prompt */}
               {showExitPrompt && (
                 <div className="absolute top-6 inset-x-0 mx-auto w-fit z-40 animate-in fade-in slide-in-from-top-3 duration-200">
                   <button
@@ -616,14 +798,44 @@ export default function PublicAlbumView() {
         </div>
       )}
 
-      {/* Gentle Post-Download Toast */}
+      {/* ----------------- ZIP GENERATION PROGRESS MODAL ----------------- */}
+      {isZipping && (
+        <div className="fixed inset-0 z-[90] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 select-none animate-in fade-in duration-200">
+          <div className="bg-neutral-950 border border-neutral-800 p-6 rounded-2xl max-w-sm w-full space-y-4 text-center shadow-2xl">
+            <div className="w-12 h-12 rounded-xl bg-blue-950/80 border border-blue-800/80 text-blue-400 flex items-center justify-center mx-auto">
+              <Package size={24} className="animate-bounce" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">
+                Packaging High-Res ZIP
+              </h3>
+              <p className="text-xs text-neutral-400 font-mono">
+                Photo {zipProgress.current} of {zipProgress.total} ({zipProgress.percent}%)
+              </p>
+            </div>
+
+            {/* Progress Bar */}
+            <div className="w-full bg-neutral-900 rounded-full h-2 overflow-hidden border border-neutral-800">
+              <div
+                className="bg-blue-600 h-full transition-all duration-200 rounded-full"
+                style={{ width: `${zipProgress.percent}%` }}
+              />
+            </div>
+            <p className="text-[11px] text-neutral-500">
+              Packing full-resolution originals in memory...
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Post-Download Toast */}
       {showDownloadToast && (
         <div className="fixed bottom-6 right-6 z-[70] max-w-sm w-[calc(100vw-3rem)] p-4 rounded-xl bg-neutral-900/95 backdrop-blur-md border border-neutral-700/80 text-white shadow-2xl flex flex-col gap-2.5 animate-in fade-in slide-in-from-bottom-4 duration-300">
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
               <span className="text-xs font-bold font-mono uppercase tracking-wider text-neutral-200">
-                Full-Res Download
+                Full-Res Download Complete
               </span>
             </div>
             <button
@@ -653,7 +865,6 @@ export default function PublicAlbumView() {
         </div>
       )}
 
-      {/* Share Modal */}
       <ShareModal
         isOpen={isShareOpen}
         onClose={() => setIsShareOpen(false)}
@@ -661,7 +872,6 @@ export default function PublicAlbumView() {
         albumId={albumId}
       />
 
-      {/* Support Modal */}
       <SupportModal
         isOpen={isSupportOpen}
         onClose={() => setIsSupportOpen(false)}
