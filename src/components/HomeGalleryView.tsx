@@ -87,13 +87,11 @@ export default function HomeGalleryView({
     setIsSupportOpen(true);
   };
 
-  // Sport categories list
   const sportCategories =
     config.categories && config.categories.length > 0
       ? config.categories
       : ["Baseball", "Basketball", "Football", "Soccer"];
 
-  // Helper: Find representative photo for each sport bubble
   const getCategoryCover = (sport: string) => {
     const match = albums.find(
       (a) => a.category?.toLowerCase() === sport.toLowerCase() && Boolean(a.cover_url)
@@ -187,13 +185,13 @@ export default function HomeGalleryView({
         </div>
       )}
 
-      {/* ----------------- MINIMAL MAIN DIRECTORY VIEW ----------------- */}
+      {/* ----------------- MINIMAL DIRECTORY VIEW ----------------- */}
       <div className="min-h-screen bg-neutral-950 relative flex flex-col justify-between overflow-hidden">
-        {/* Subtle Ambient Radial Glow Backdrop */}
+        {/* Subtle Ambient Radial Glow */}
         <div className="pointer-events-none absolute inset-0 bg-radial from-blue-950/20 via-neutral-950/80 to-neutral-950" />
 
         <div>
-          {/* Header (Preserved Exactly As-Is) */}
+          {/* Header */}
           <header className="border-b border-neutral-800/60 sticky top-0 z-30 bg-neutral-950/75 backdrop-blur-md">
             <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
               <button
@@ -235,11 +233,11 @@ export default function HomeGalleryView({
             </div>
           </header>
 
-          {/* Main Showcase Section */}
-          <main className="relative max-w-7xl mx-auto px-6 pt-8 pb-12 space-y-10">
-            {/* 1. Circular Sport Category Bubbles Row */}
-            <div className="flex flex-col items-center space-y-4">
-              <div className="flex items-center justify-center gap-6 sm:gap-10 overflow-x-auto py-2 px-4 w-full no-scrollbar">
+          {/* Main Content Showcase */}
+          <main className="relative max-w-7xl mx-auto px-6 pt-10 pb-16 space-y-14">
+            {/* 1. ENLARGED SPORT PORTALS (2-Row Mobile Grid / High-Impact Desktop Row) */}
+            <div className="flex flex-col items-center">
+              <div className="grid grid-cols-2 sm:grid-cols-4 md:flex md:flex-wrap md:justify-center md:items-center gap-6 sm:gap-8 md:gap-12 w-full max-w-5xl">
                 {sportCategories.map((sport) => {
                   const coverUrl = getCategoryCover(sport);
                   const sportSlug = sport.toLowerCase().replace(/[^a-z0-9]+/g, "-");
@@ -251,32 +249,32 @@ export default function HomeGalleryView({
                     <Link
                       key={sport}
                       href={`/category/${sportSlug}`}
-                      className="group flex flex-col items-center gap-2.5 transition shrink-0"
+                      className="group flex flex-col items-center gap-3 transition"
                     >
-                      {/* Circular Bubble Image */}
-                      <div className="relative w-20 h-20 sm:w-24 sm:h-24 md:w-28 md:h-28 rounded-full p-[2px] bg-gradient-to-b from-neutral-700 to-neutral-900 group-hover:from-blue-500 group-hover:to-cyan-400 transition-all duration-300 shadow-xl group-hover:shadow-blue-950/60 group-hover:scale-105">
+                      {/* Large Portal Bubble */}
+                      <div className="relative w-32 h-32 sm:w-36 sm:h-36 md:w-44 md:h-44 lg:w-48 lg:h-48 rounded-full p-[3px] bg-gradient-to-b from-neutral-700 via-neutral-800 to-neutral-950 group-hover:from-blue-500 group-hover:to-cyan-400 transition-all duration-500 shadow-2xl group-hover:shadow-blue-950/60 group-hover:scale-105">
                         <div className="w-full h-full rounded-full overflow-hidden bg-neutral-900 relative">
                           {coverUrl ? (
                             <img
                               src={coverUrl}
                               alt={sport}
-                              className="w-full h-full object-cover group-hover:scale-110 transition duration-500"
+                              className="w-full h-full object-cover group-hover:scale-110 transition duration-700"
                             />
                           ) : (
                             <div className="w-full h-full flex items-center justify-center text-neutral-600 bg-neutral-900">
-                              <Folder size={24} />
+                              <Folder size={32} />
                             </div>
                           )}
-                          <div className="absolute inset-0 bg-black/20 group-hover:bg-transparent transition-colors duration-300" />
+                          <div className="absolute inset-0 bg-black/25 group-hover:bg-transparent transition-colors duration-300" />
                         </div>
                       </div>
 
-                      {/* Sport Label & Count */}
-                      <div className="text-center space-y-0.5">
-                        <span className="text-xs sm:text-sm font-bold tracking-wider text-neutral-200 group-hover:text-white uppercase font-mono block">
+                      {/* Stacked Narrow Label Container */}
+                      <div className="text-center max-w-[120px] sm:max-w-[140px] md:max-w-[160px] space-y-0.5">
+                        <span className="text-xs sm:text-sm md:text-base font-bold tracking-wider text-neutral-200 group-hover:text-white uppercase font-mono leading-tight break-words block">
                           {sport}
                         </span>
-                        <span className="text-[10px] text-neutral-500 font-mono">
+                        <span className="text-[10px] sm:text-xs text-neutral-500 font-mono block">
                           {sportAlbums.length} {sportAlbums.length === 1 ? "Album" : "Albums"}
                         </span>
                       </div>
@@ -286,7 +284,7 @@ export default function HomeGalleryView({
               </div>
             </div>
 
-            {/* 2. Most Recent Albums Section */}
+            {/* 2. RECENT 3 ALBUMS CENTERPIECE */}
             <div className="space-y-4">
               <div className="flex items-center justify-between border-b border-neutral-800/80 pb-3">
                 <span className="text-xs font-mono tracking-widest text-neutral-400 uppercase">
