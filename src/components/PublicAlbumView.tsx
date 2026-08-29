@@ -58,13 +58,15 @@ export default function PublicAlbumView() {
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
 
-  // Fullscreen & Cue State
+  // Fullscreen, Touch & Swipe Gesture State
   const [isImmersive, setIsImmersive] = useState(false);
   const [navCue, setNavCue] = useState<"both" | "left" | "right" | "none">("none");
   const [showExitPrompt, setShowExitPrompt] = useState(false);
+  const [dragOffset, setDragOffset] = useState<number>(0);
+  const [isSwiping, setIsSwiping] = useState<boolean>(false);
 
-  const touchStartY = useRef<number>(0);
   const touchStartX = useRef<number>(0);
+  const touchStartY = useRef<number>(0);
   const cueTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const exitPromptTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -112,7 +114,7 @@ export default function PublicAlbumView() {
     loadAlbum();
   }, [albumId]);
 
-  // Sync native browser fullscreen changes (e.g. user hits Escape on desktop)
+  // Sync native browser fullscreen changes
   useEffect(() => {
     function onFullscreenChange() {
       if (!document.fullscreenElement) {
@@ -216,6 +218,22 @@ export default function PublicAlbumView() {
   const photos = album?.photos || [];
   const selectedPhoto = selectedIndex !== null ? photos[selectedIndex] : null;
 
+  // Background Image Preloader (Zero-Lag Next/Prev Navigation)
+  useEffect(() => {
+    if (selectedIndex === null || photos.length === 0) return;
+    const indicesToPreload = [
+      (selectedIndex + 1) % photos.length,
+      (selectedIndex + 2) % photos.length,
+      (selectedIndex - 1 + photos.length) % photos.length,
+    ];
+    indicesToPreload.forEach((idx) => {
+      if (photos[idx]?.urls?.display) {
+        const img = new Image();
+        img.src = photos[idx].urls.display;
+      }
+    });
+  }, [selectedIndex, photos]);
+
   const showNext = useCallback(() => {
     if (selectedIndex === null || photos.length === 0) return;
     setSelectedIndex((prev) => (prev !== null && prev < photos.length - 1 ? prev + 1 : 0));
@@ -238,23 +256,69 @@ export default function PublicAlbumView() {
     triggerCue("right", 500);
   };
 
-  // Swipe detection for exiting fullscreen on touch devices
+  // ----------------- ADVANCED TOUCH SWIPE GESTURE HANDLERS -----------------
   const handleTouchStart = (e: React.TouchEvent) => {
-    touchStartY.current = e.touches[0].clientY;
     touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+    setIsSwiping(true);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!isSwiping) return;
+    const currentX = e.touches[0].clientX;
+    const currentY = e.touches[0].clientY;
+    const deltaX = currentX - touchStartX.current;
+    const deltaY = currentY - touchStartY.current;
+
+    // Track horizontal drag with soft resistance
+    if (Math.abs(deltaX) > Math.abs(deltaY)) {
+      setDragOffset(deltaX * 0.75);
+    }
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
-    const deltaY = e.changedTouches[0].clientY - touchStartY.current;
-    const deltaX = e.changedTouches[0].clientX - touchStartX.current;
+    setIsSwiping(false);
+    const endX = e.changedTouches[0].clientX;
+    const endY = e.changedTouches[0].clientY;
+    const deltaX = endX - touchStartX.current;
+    const deltaY = endY - touchStartY.current;
+    const screenWidth = typeof window !== "undefined" ? window.innerWidth : 400;
 
-    // Detect downward swipe (minimum 50px downward, primarily vertical)
-    if (deltaY > 50 && Math.abs(deltaY) > Math.abs(deltaX) * 1.5) {
-      setShowExitPrompt(true);
-      if (exitPromptTimeoutRef.current) clearTimeout(exitPromptTimeoutRef.current);
-      exitPromptTimeoutRef.current = setTimeout(() => {
-        setShowExitPrompt(false);
-      }, 4000);
+    setDragOffset(0);
+
+    // 1. Horizontal Swipe Detection (Threshold: > 45px)
+    if (Math.abs(deltaX) > 45 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2) {
+      if (deltaX < 0) {
+        showNext();
+        if (isImmersive) triggerCue("right", 500);
+      } else {
+        showPrev();
+        if (isImmersive) triggerCue("left", 500);
+      }
+      return;
+    }
+
+    // 2. Vertical Downward Swipe Detection (Threshold: > 55px)
+    if (deltaY > 55 && Math.abs(deltaY) > Math.abs(deltaX) * 1.4) {
+      if (isImmersive) {
+        setShowExitPrompt(true);
+        if (exitPromptTimeoutRef.current) clearTimeout(exitPromptTimeoutRef.current);
+        exitPromptTimeoutRef.current = setTimeout(() => {
+          setShowExitPrompt(false);
+        }, 4000);
+      } else {
+        exitLightbox();
+      }
+      return;
+    }
+
+    // 3. Fallback to Tap Regions if no swipe gesture was dragged
+    if (Math.abs(deltaX) < 12 && Math.abs(deltaY) < 12) {
+      if (endX < screenWidth * 0.35) {
+        handleFullscreenPrev();
+      } else if (endX > screenWidth * 0.65) {
+        handleFullscreenNext();
+      }
     }
   };
 
@@ -368,7 +432,7 @@ export default function PublicAlbumView() {
               </div>
             )}
 
-            {/* Combined Avatar Roster & Name Badge */}
+            {/* Mascot Avatar & Tap-to-Name Sideline Roster */}
             <ViewerPresenceBadge albumId={albumId} />
           </div>
         </div>
@@ -388,7 +452,6 @@ export default function PublicAlbumView() {
                 loading="lazy"
                 style={photo.aspect_ratio ? { aspectRatio: `${photo.aspect_ratio}` } : undefined}
               />
-              {/* Desktop-only hover overlay (hidden on mobile to prevent accidental download taps) */}
               <div className="hidden sm:flex absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-200 items-center justify-center gap-2">
                 <span className="p-2 rounded-full bg-black/60 text-white backdrop-blur-md">
                   <Maximize2 size={16} />
@@ -410,10 +473,13 @@ export default function PublicAlbumView() {
       {/* ----------------- LIGHTBOX MODAL (STANDARD & FULLSCREEN) ----------------- */}
       {selectedPhoto !== null && selectedIndex !== null && (
         <div
-          className={`fixed inset-0 z-50 bg-black flex items-center justify-center select-none overflow-hidden ${
+          className={`fixed inset-0 z-50 bg-black flex items-center justify-center select-none overflow-hidden touch-none ${
             isImmersive ? "w-screen h-[100dvh]" : "bg-black/95 backdrop-blur-md"
           }`}
           onClick={exitLightbox}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
         >
           {/* STANDARD MODE CONTROLS */}
           {!isImmersive && (
@@ -424,7 +490,6 @@ export default function PublicAlbumView() {
                   {selectedIndex + 1} / {photos.length}
                 </span>
 
-                {/* Prominent Blue Full Screen Button */}
                 <button
                   type="button"
                   onClick={(e) => {
@@ -441,7 +506,7 @@ export default function PublicAlbumView() {
                 <button
                   type="button"
                   onClick={(e) => handleDownload(e, selectedPhoto.urls.original, selectedPhoto.original_filename)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur-md transition cursor-pointer"
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur-md transition cursor-pointer"
                 >
                   <Download size={13} />
                   <span className="hidden sm:inline">Download</span>
@@ -484,39 +549,32 @@ export default function PublicAlbumView() {
                 </>
               )}
 
-              {/* Standard Photo Display */}
-              <img
-                src={selectedPhoto.urls.display}
-                alt={selectedPhoto.original_filename}
-                className="max-h-[85vh] max-w-[85vw] object-contain rounded-lg shadow-2xl"
+              {/* Standard View Photo with Active Swipe Tracking */}
+              <div
+                className="max-h-[85vh] max-w-[85vw] flex items-center justify-center transition-transform ease-out duration-150"
+                style={{
+                  transform: `translateX(${dragOffset}px)`,
+                }}
                 onClick={(e) => e.stopPropagation()}
-              />
+              >
+                <img
+                  src={selectedPhoto.urls.display}
+                  alt={selectedPhoto.original_filename}
+                  className="max-h-[85vh] max-w-[85vw] object-contain rounded-lg shadow-2xl pointer-events-none"
+                />
+              </div>
             </>
           )}
 
           {/* ----------------- FULLSCREEN IMMERSIVE MODE ----------------- */}
           {isImmersive && (
             <div
-              className="relative w-full h-full flex items-center justify-center"
+              className="relative w-full h-full flex items-center justify-center transition-transform ease-out duration-150"
+              style={{
+                transform: `translateX(${dragOffset}px)`,
+              }}
               onClick={(e) => e.stopPropagation()}
-              onTouchStart={handleTouchStart}
-              onTouchEnd={handleTouchEnd}
             >
-              {/* Left 35% Tap Zone -> Previous */}
-              <div
-                className="absolute left-0 top-0 bottom-0 w-[35%] z-20 cursor-w-resize"
-                onClick={handleFullscreenPrev}
-              />
-
-              {/* Right 35% Tap Zone -> Next */}
-              <div
-                className="absolute right-0 top-0 bottom-0 w-[35%] z-20 cursor-e-resize"
-                onClick={handleFullscreenNext}
-              />
-
-              {/* Center 30% Tap Zone -> Does nothing */}
-              <div className="absolute left-[35%] right-[35%] top-0 bottom-0 z-20" />
-
               {/* Fullscreen Photo */}
               <img
                 src={selectedPhoto.urls.display}
@@ -524,7 +582,7 @@ export default function PublicAlbumView() {
                 className="w-full h-full object-contain pointer-events-none select-none"
               />
 
-              {/* Faint Chevron Visual Cues */}
+              {/* Faint Visual Chevrons */}
               <div
                 className={`pointer-events-none absolute left-4 sm:left-8 top-1/2 -translate-y-1/2 transition-opacity duration-300 z-30 ${
                   navCue === "both" || navCue === "left" ? "opacity-35" : "opacity-0"
