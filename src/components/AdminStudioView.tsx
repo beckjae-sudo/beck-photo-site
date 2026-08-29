@@ -110,7 +110,7 @@ export default function AdminStudioView() {
 
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
-    setUploadProgressText("Processing images in browser...");
+    setUploadProgressText("Processing Retina 3K images in browser...");
     const processedList: ProcessedPhoto[] = [];
 
     for (let i = 0; i < files.length; i++) {
@@ -120,8 +120,14 @@ export default function AdminStudioView() {
       }
     }
 
+    // Sort batch by shot timestamp so sequence matches game timeline
+    processedList.sort((a, b) => a.timestamp - b.timestamp);
+
     setPhotos((prev) => {
       const combined = [...prev, ...processedList];
+      // Keep overall queue in chronological order
+      combined.sort((a, b) => a.timestamp - b.timestamp);
+
       if (!coverPhotoUid && combined.length > 0) {
         setCoverPhotoUid(combined[0].uid);
       }
