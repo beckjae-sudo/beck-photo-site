@@ -64,7 +64,8 @@ export default function HomeGalleryView({
   const [showSplash, setShowSplash] = useState(true);
   const [currentCoverIndex, setCurrentCoverIndex] = useState(0);
 
-  // Live Backdrop Brightness / Opacity Slider State (Default: 40%)
+  // Live Brightness Slider States
+  const [splashOpacity, setSplashOpacity] = useState<number>(80);
   const [mosaicOpacity, setMosaicOpacity] = useState<number>(40);
   const [showTuner, setShowTuner] = useState(false);
 
@@ -86,13 +87,19 @@ export default function HomeGalleryView({
   }, [coverPhotos]);
 
   useEffect(() => {
-    const savedOpacity = localStorage.getItem("beck_mosaic_opacity");
-    if (savedOpacity) {
-      setMosaicOpacity(Number(savedOpacity));
-    }
+    const savedSplash = localStorage.getItem("beck_splash_opacity");
+    if (savedSplash) setSplashOpacity(Number(savedSplash));
+
+    const savedMosaic = localStorage.getItem("beck_mosaic_opacity");
+    if (savedMosaic) setMosaicOpacity(Number(savedMosaic));
   }, []);
 
-  const handleOpacityChange = (val: number) => {
+  const handleSplashOpacityChange = (val: number) => {
+    setSplashOpacity(val);
+    localStorage.setItem("beck_splash_opacity", String(val));
+  };
+
+  const handleMosaicOpacityChange = (val: number) => {
     setMosaicOpacity(val);
     localStorage.setItem("beck_mosaic_opacity", String(val));
   };
@@ -134,8 +141,11 @@ export default function HomeGalleryView({
               <div
                 key={url}
                 className={`absolute inset-0 transition-opacity duration-1000 ease-in-out ${
-                  idx === currentCoverIndex ? "opacity-80" : "opacity-0 pointer-events-none"
+                  idx === currentCoverIndex ? "pointer-events-auto" : "pointer-events-none"
                 }`}
+                style={{
+                  opacity: idx === currentCoverIndex ? splashOpacity / 100 : 0,
+                }}
               >
                 <img
                   src={url}
@@ -182,7 +192,10 @@ export default function HomeGalleryView({
 
             <div className="flex flex-col items-center gap-4">
               <button
-                onClick={() => setShowSplash(false)}
+                onClick={() => {
+                  setShowTuner(false);
+                  setShowSplash(false);
+                }}
                 className="group relative flex items-center gap-3 px-8 py-3.5 rounded-full bg-white/10 hover:bg-white/20 active:bg-white/25 text-white text-xs font-semibold tracking-widest uppercase backdrop-blur-xl border border-white/25 hover:border-white/40 shadow-[0_8px_32px_0_rgba(0,0,0,0.5),inset_0_1px_1px_0_rgba(255,255,255,0.4)] transition-all duration-300 hover:scale-105 active:scale-95 cursor-pointer"
               >
                 <span>Enter Gallery</span>
@@ -210,9 +223,9 @@ export default function HomeGalleryView({
         </div>
       )}
 
-      {/* ----------------- MAIN DIRECTORY VIEW WITH BRIGHTER ARTISAN MOSAIC ----------------- */}
+      {/* ----------------- DIRECTORY VIEW ----------------- */}
       <div className="min-h-screen bg-neutral-950 relative flex flex-col justify-between overflow-hidden">
-        {/* 1. Dynamic Photo Mosaic (Brightness driven by slider) */}
+        {/* Dynamic Photo Mosaic */}
         {mosaicPhotos.length > 0 && (
           <div
             className="pointer-events-none fixed inset-0 z-0 overflow-hidden select-none transition-opacity duration-300"
@@ -237,7 +250,7 @@ export default function HomeGalleryView({
           </div>
         )}
 
-        {/* 2. Tuned Radial Vignette (Preserves card contrast while showing photos) */}
+        {/* Radial Vignette */}
         <div className="pointer-events-none fixed inset-0 z-0 bg-radial from-transparent via-neutral-950/40 to-neutral-950/90" />
         <div className="pointer-events-none fixed inset-0 z-0 bg-gradient-to-t from-neutral-950 via-transparent to-neutral-950/80" />
 
@@ -246,7 +259,10 @@ export default function HomeGalleryView({
           <header className="border-b border-neutral-800/60 sticky top-0 z-30 bg-neutral-950/80 backdrop-blur-md">
             <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
               <button
-                onClick={() => setShowSplash(true)}
+                onClick={() => {
+                  setShowTuner(false);
+                  setShowSplash(true);
+                }}
                 className="font-black text-sm tracking-tighter uppercase text-white flex items-center gap-1 hover:opacity-80 transition cursor-pointer"
                 title="Return to Splash Screen"
               >
@@ -286,7 +302,7 @@ export default function HomeGalleryView({
 
           {/* Main Showcase Section */}
           <main className="relative max-w-7xl mx-auto px-6 pt-10 pb-16 space-y-14">
-            {/* 1. SPORT PORTALS (2-Row Grid on Mobile / Single Row on Desktop) */}
+            {/* 1. SPORT PORTALS */}
             <div className="flex flex-col items-center">
               {/* Mobile Layout: 2 Columns */}
               <div className="grid grid-cols-2 gap-6 max-w-xs mx-auto md:hidden">
@@ -329,7 +345,7 @@ export default function HomeGalleryView({
                 })}
               </div>
 
-              {/* Desktop Layout: Strictly Single Horizontal Row */}
+              {/* Desktop Layout: Single Horizontal Row */}
               <div className="hidden md:flex md:flex-row md:flex-nowrap md:justify-center md:items-center md:gap-10 lg:gap-14 w-full">
                 {sportCategories.map((sport) => {
                   const coverUrl = getCategoryCover(sport);
@@ -436,40 +452,6 @@ export default function HomeGalleryView({
           </main>
         </div>
 
-        {/* ----------------- LIVE BACKDROP TUNER WIDGET ----------------- */}
-        <div className="fixed bottom-4 left-4 z-40">
-          {showTuner ? (
-            <div className="flex items-center gap-3 px-3.5 py-2 rounded-xl bg-neutral-900/95 border border-neutral-700 backdrop-blur-md shadow-2xl animate-in fade-in slide-in-from-bottom-2 duration-200">
-              <span className="text-[10px] font-mono text-neutral-400 uppercase tracking-wider">
-                Mosaic: {mosaicOpacity}%
-              </span>
-              <input
-                type="range"
-                min="0"
-                max="80"
-                step="5"
-                value={mosaicOpacity}
-                onChange={(e) => handleOpacityChange(Number(e.target.value))}
-                className="w-24 accent-blue-500 h-1.5 bg-neutral-800 rounded-lg cursor-pointer"
-              />
-              <button
-                onClick={() => setShowTuner(false)}
-                className="text-[10px] font-mono text-neutral-400 hover:text-white px-1"
-              >
-                ✕
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={() => setShowTuner(true)}
-              className="p-2 rounded-xl bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-400 hover:text-white transition shadow-lg cursor-pointer"
-              title="Tune Backdrop Brightness"
-            >
-              <Sliders size={14} />
-            </button>
-          )}
-        </div>
-
         {/* Footer */}
         <footer className="border-t border-neutral-900 bg-neutral-950/80 backdrop-blur-md relative z-10">
           <div className="max-w-7xl mx-auto px-6 py-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-neutral-500 font-mono">
@@ -496,6 +478,45 @@ export default function HomeGalleryView({
             </div>
           </div>
         </footer>
+      </div>
+
+      {/* ----------------- DUAL CONTEXTUAL LIVE TUNER (AVAILABLE ON BOTH SCREENS) ----------------- */}
+      <div className="fixed bottom-4 left-4 z-[60]">
+        {showTuner ? (
+          <div className="flex items-center gap-3 px-3.5 py-2 rounded-xl bg-neutral-900/95 border border-neutral-700 backdrop-blur-md shadow-2xl animate-in fade-in slide-in-from-bottom-2 duration-200">
+            <span className="text-[10px] font-mono text-neutral-300 uppercase tracking-wider">
+              {showSplash ? `Hero: ${splashOpacity}%` : `Mosaic: ${mosaicOpacity}%`}
+            </span>
+            <input
+              type="range"
+              min={showSplash ? "20" : "0"}
+              max={showSplash ? "100" : "80"}
+              step="5"
+              value={showSplash ? splashOpacity : mosaicOpacity}
+              onChange={(e) =>
+                showSplash
+                  ? handleSplashOpacityChange(Number(e.target.value))
+                  : handleMosaicOpacityChange(Number(e.target.value))
+              }
+              className="w-24 accent-blue-500 h-1.5 bg-neutral-800 rounded-lg cursor-pointer"
+            >
+            </input>
+            <button
+              onClick={() => setShowTuner(false)}
+              className="text-[10px] font-mono text-neutral-400 hover:text-white px-1 cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setShowTuner(true)}
+            className="p-2 rounded-xl bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-400 hover:text-white transition shadow-lg cursor-pointer"
+            title={showSplash ? "Tune Splash Hero Brightness" : "Tune Mosaic Wallpaper Brightness"}
+          >
+            <Sliders size={14} />
+          </button>
+        )}
       </div>
 
       <SupportModal
