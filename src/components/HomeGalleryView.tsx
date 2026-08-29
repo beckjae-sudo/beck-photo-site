@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
-import { Folder, Calendar, Layers, ArrowRight, Coffee } from "lucide-react";
+import { Folder, Calendar, Layers, ArrowRight, Coffee, Sliders } from "lucide-react";
 import SupportModal, { FundType } from "@/components/SupportModal";
 
 export interface AlbumSummary {
@@ -64,6 +64,10 @@ export default function HomeGalleryView({
   const [showSplash, setShowSplash] = useState(true);
   const [currentCoverIndex, setCurrentCoverIndex] = useState(0);
 
+  // Live Backdrop Brightness / Opacity Slider State (Default: 40%)
+  const [mosaicOpacity, setMosaicOpacity] = useState<number>(40);
+  const [showTuner, setShowTuner] = useState(false);
+
   // Support Modal State
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [supportFund, setSupportFund] = useState<FundType>("gear");
@@ -72,7 +76,6 @@ export default function HomeGalleryView({
     .filter((a) => Boolean(a.cover_url))
     .map((a) => getHighResCoverUrl(a.cover_url));
 
-  // Build a populated array of covers for the background mosaic (at least 24 tiles)
   const mosaicPhotos = useMemo(() => {
     if (coverPhotos.length === 0) return [];
     const tiles: string[] = [];
@@ -81,6 +84,18 @@ export default function HomeGalleryView({
     }
     return tiles.slice(0, 24);
   }, [coverPhotos]);
+
+  useEffect(() => {
+    const savedOpacity = localStorage.getItem("beck_mosaic_opacity");
+    if (savedOpacity) {
+      setMosaicOpacity(Number(savedOpacity));
+    }
+  }, []);
+
+  const handleOpacityChange = (val: number) => {
+    setMosaicOpacity(val);
+    localStorage.setItem("beck_mosaic_opacity", String(val));
+  };
 
   useEffect(() => {
     if (!showSplash || coverPhotos.length <= 1) return;
@@ -195,16 +210,19 @@ export default function HomeGalleryView({
         </div>
       )}
 
-      {/* ----------------- MAIN DIRECTORY VIEW WITH ARTISAN MOSAIC ----------------- */}
+      {/* ----------------- MAIN DIRECTORY VIEW WITH BRIGHTER ARTISAN MOSAIC ----------------- */}
       <div className="min-h-screen bg-neutral-950 relative flex flex-col justify-between overflow-hidden">
-        {/* 1. Artistic Photo Mosaic Backdrop */}
+        {/* 1. Dynamic Photo Mosaic (Brightness driven by slider) */}
         {mosaicPhotos.length > 0 && (
-          <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden opacity-[0.16] select-none">
-            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2 sm:gap-3 p-3 -rotate-1 scale-110 filter saturate-50 contrast-125">
+          <div
+            className="pointer-events-none fixed inset-0 z-0 overflow-hidden select-none transition-opacity duration-300"
+            style={{ opacity: mosaicOpacity / 100 }}
+          >
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2.5 sm:gap-3.5 p-3 -rotate-1 scale-105 filter saturate-75 contrast-110">
               {mosaicPhotos.map((url, idx) => (
                 <div
                   key={`${url}-${idx}`}
-                  className={`rounded-xl overflow-hidden bg-neutral-900 ${
+                  className={`rounded-xl overflow-hidden bg-neutral-900 border border-white/5 ${
                     idx % 3 === 0
                       ? "aspect-4/3"
                       : idx % 2 === 0
@@ -219,10 +237,9 @@ export default function HomeGalleryView({
           </div>
         )}
 
-        {/* 2. Layered Vignette & Dark Atmosphere */}
-        <div className="pointer-events-none fixed inset-0 z-0 bg-radial from-transparent via-neutral-950/70 to-neutral-950" />
-        <div className="pointer-events-none fixed inset-0 z-0 bg-gradient-to-t from-neutral-950 via-neutral-950/50 to-neutral-950/90" />
-        <div className="pointer-events-none fixed inset-0 z-0 bg-blue-950/10 mix-blend-screen" />
+        {/* 2. Tuned Radial Vignette (Preserves card contrast while showing photos) */}
+        <div className="pointer-events-none fixed inset-0 z-0 bg-radial from-transparent via-neutral-950/40 to-neutral-950/90" />
+        <div className="pointer-events-none fixed inset-0 z-0 bg-gradient-to-t from-neutral-950 via-transparent to-neutral-950/80" />
 
         <div className="relative z-10">
           {/* Header */}
@@ -267,11 +284,12 @@ export default function HomeGalleryView({
             </div>
           </header>
 
-          {/* Main Content Showcase */}
+          {/* Main Showcase Section */}
           <main className="relative max-w-7xl mx-auto px-6 pt-10 pb-16 space-y-14">
-            {/* 1. Scaled Sport Portals (2-Row Mobile / Center Desktop) */}
+            {/* 1. SPORT PORTALS (2-Row Grid on Mobile / Single Row on Desktop) */}
             <div className="flex flex-col items-center">
-              <div className="grid grid-cols-2 sm:grid-cols-4 md:flex md:flex-wrap md:justify-center md:items-center gap-6 sm:gap-8 md:gap-12 w-full max-w-5xl">
+              {/* Mobile Layout: 2 Columns */}
+              <div className="grid grid-cols-2 gap-6 max-w-xs mx-auto md:hidden">
                 {sportCategories.map((sport) => {
                   const coverUrl = getCategoryCover(sport);
                   const sportSlug = sport.toLowerCase().replace(/[^a-z0-9]+/g, "-");
@@ -283,10 +301,50 @@ export default function HomeGalleryView({
                     <Link
                       key={sport}
                       href={`/category/${sportSlug}`}
-                      className="group flex flex-col items-center gap-3 transition"
+                      className="group flex flex-col items-center gap-2.5 transition"
                     >
-                      {/* Large Portal Bubble */}
-                      <div className="relative w-32 h-32 sm:w-36 sm:h-36 md:w-44 md:h-44 lg:w-48 lg:h-48 rounded-full p-[3px] bg-gradient-to-b from-neutral-700 via-neutral-800 to-neutral-950 group-hover:from-blue-500 group-hover:to-cyan-400 transition-all duration-500 shadow-2xl group-hover:shadow-blue-950/60 group-hover:scale-105">
+                      <div className="relative w-32 h-32 rounded-full p-[2.5px] bg-gradient-to-b from-neutral-700 via-neutral-800 to-neutral-950 group-hover:from-blue-500 group-hover:to-cyan-400 transition-all duration-300 shadow-xl group-hover:scale-105">
+                        <div className="w-full h-full rounded-full overflow-hidden bg-neutral-900 relative">
+                          {coverUrl ? (
+                            <img src={coverUrl} alt={sport} className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-neutral-600 bg-neutral-900">
+                              <Folder size={28} />
+                            </div>
+                          )}
+                          <div className="absolute inset-0 bg-black/20 group-hover:bg-transparent" />
+                        </div>
+                      </div>
+
+                      <div className="text-center space-y-0.5 max-w-[120px]">
+                        <span className="text-xs font-bold tracking-wider text-neutral-200 uppercase font-mono block leading-tight">
+                          {sport}
+                        </span>
+                        <span className="text-[10px] text-neutral-500 font-mono block">
+                          {sportAlbums.length} {sportAlbums.length === 1 ? "Album" : "Albums"}
+                        </span>
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+
+              {/* Desktop Layout: Strictly Single Horizontal Row */}
+              <div className="hidden md:flex md:flex-row md:flex-nowrap md:justify-center md:items-center md:gap-10 lg:gap-14 w-full">
+                {sportCategories.map((sport) => {
+                  const coverUrl = getCategoryCover(sport);
+                  const sportSlug = sport.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+                  const sportAlbums = albums.filter(
+                    (a) => a.category?.toLowerCase() === sport.toLowerCase()
+                  );
+
+                  return (
+                    <Link
+                      key={sport}
+                      href={`/category/${sportSlug}`}
+                      className="group flex flex-col items-center gap-3 transition shrink-0"
+                    >
+                      <div className="relative md:w-36 md:h-36 lg:w-44 lg:h-44 rounded-full p-[3px] bg-gradient-to-b from-neutral-700 via-neutral-800 to-neutral-950 group-hover:from-blue-500 group-hover:to-cyan-400 transition-all duration-500 shadow-2xl group-hover:shadow-blue-950/60 group-hover:scale-105">
                         <div className="w-full h-full rounded-full overflow-hidden bg-neutral-900 relative">
                           {coverUrl ? (
                             <img
@@ -303,12 +361,11 @@ export default function HomeGalleryView({
                         </div>
                       </div>
 
-                      {/* Stacked Narrow Label Container */}
-                      <div className="text-center max-w-[120px] sm:max-w-[140px] md:max-w-[160px] space-y-0.5">
-                        <span className="text-xs sm:text-sm md:text-base font-bold tracking-wider text-neutral-200 group-hover:text-white uppercase font-mono leading-tight break-words block">
+                      <div className="text-center max-w-[140px] space-y-0.5">
+                        <span className="text-sm md:text-base font-bold tracking-wider text-neutral-200 group-hover:text-white uppercase font-mono leading-tight block">
                           {sport}
                         </span>
-                        <span className="text-[10px] sm:text-xs text-neutral-500 font-mono block">
+                        <span className="text-xs text-neutral-500 font-mono block">
                           {sportAlbums.length} {sportAlbums.length === 1 ? "Album" : "Albums"}
                         </span>
                       </div>
@@ -318,7 +375,7 @@ export default function HomeGalleryView({
               </div>
             </div>
 
-            {/* 2. Recent 3 Albums Centerpiece */}
+            {/* 2. RECENT 3 ALBUMS CENTERPIECE */}
             <div className="space-y-4">
               <div className="flex items-center justify-between border-b border-neutral-800/80 pb-3">
                 <span className="text-xs font-mono tracking-widest text-neutral-400 uppercase">
@@ -334,7 +391,7 @@ export default function HomeGalleryView({
                   <Link
                     key={album.id}
                     href={`/album/${album.id}`}
-                    className="group relative rounded-2xl overflow-hidden border border-neutral-800/80 hover:border-blue-500/50 bg-neutral-900/60 hover:bg-neutral-900/90 backdrop-blur-sm transition-all duration-300 flex flex-col shadow-xl hover:shadow-2xl hover:shadow-blue-950/30"
+                    className="group relative rounded-2xl overflow-hidden border border-neutral-800/80 hover:border-blue-500/50 bg-neutral-900/70 hover:bg-neutral-900/95 backdrop-blur-sm transition-all duration-300 flex flex-col shadow-xl hover:shadow-2xl hover:shadow-blue-950/40"
                   >
                     <div className="relative aspect-4/3 overflow-hidden bg-neutral-900">
                       {album.cover_url ? (
@@ -377,6 +434,40 @@ export default function HomeGalleryView({
               </div>
             </div>
           </main>
+        </div>
+
+        {/* ----------------- LIVE BACKDROP TUNER WIDGET ----------------- */}
+        <div className="fixed bottom-4 left-4 z-40">
+          {showTuner ? (
+            <div className="flex items-center gap-3 px-3.5 py-2 rounded-xl bg-neutral-900/95 border border-neutral-700 backdrop-blur-md shadow-2xl animate-in fade-in slide-in-from-bottom-2 duration-200">
+              <span className="text-[10px] font-mono text-neutral-400 uppercase tracking-wider">
+                Mosaic: {mosaicOpacity}%
+              </span>
+              <input
+                type="range"
+                min="0"
+                max="80"
+                step="5"
+                value={mosaicOpacity}
+                onChange={(e) => handleOpacityChange(Number(e.target.value))}
+                className="w-24 accent-blue-500 h-1.5 bg-neutral-800 rounded-lg cursor-pointer"
+              />
+              <button
+                onClick={() => setShowTuner(false)}
+                className="text-[10px] font-mono text-neutral-400 hover:text-white px-1"
+              >
+                ✕
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowTuner(true)}
+              className="p-2 rounded-xl bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-400 hover:text-white transition shadow-lg cursor-pointer"
+              title="Tune Backdrop Brightness"
+            >
+              <Sliders size={14} />
+            </button>
+          )}
         </div>
 
         {/* Footer */}
