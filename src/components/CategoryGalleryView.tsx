@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowLeft, Folder, Calendar, Layers, Coffee, Share2 } from "lucide-react";
 import SupportModal, { FundType } from "@/components/SupportModal";
 import ShareModal from "@/components/ShareModal";
+import { shuffleArray, getFocalPointStyle } from "@/lib/imageRandomizer";
 
 export interface AlbumSummary {
   id: string;
@@ -14,6 +15,7 @@ export interface AlbumSummary {
   sub_category?: string;
   photo_count: number;
   cover_url: string;
+  focal_point?: string;
 }
 
 interface CategoryGalleryViewProps {
@@ -21,8 +23,6 @@ interface CategoryGalleryViewProps {
   sportTitle: string;
   albums: AlbumSummary[];
 }
-
-const INSTAGRAM_HANDLE = "shot.by.jaden2";
 
 export default function CategoryGalleryView({
   sportSlug,
@@ -34,14 +34,29 @@ export default function CategoryGalleryView({
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [supportFund, setSupportFund] = useState<FundType>("gear");
 
-  // Extract all unique sub-categories present in this sport's albums
+  // Sport-specific randomized mosaic backdrop
+  const sportMosaicPhotos = useMemo(() => {
+    const rawCovers = albums
+      .filter((a) => Boolean(a.cover_url))
+      .map((a) => ({
+        url: a.cover_url,
+        focal_point: a.focal_point,
+      }));
+    if (rawCovers.length === 0) return [];
+
+    let tiles = shuffleArray(rawCovers);
+    while (tiles.length < 24) {
+      tiles = [...tiles, ...shuffleArray(rawCovers)];
+    }
+    return tiles.slice(0, 24);
+  }, [albums]);
+
   const subCategories = useMemo(() => {
     const set = new Set<string>();
     albums.forEach((a) => {
       if (a.sub_category) {
         set.add(a.sub_category);
       } else {
-        // Infer sub-tier from title keywords if not explicitly tagged
         const titleLower = a.title.toLowerCase();
         if (titleLower.includes("varsity") || titleLower.includes("high school")) set.add("Varsity");
         else if (titleLower.includes("middle school") || titleLower.includes("ms")) set.add("Middle School");
@@ -53,7 +68,6 @@ export default function CategoryGalleryView({
     return list.length > 0 ? ["All", ...list] : ["All"];
   }, [albums]);
 
-  // Filter albums based on active sub-category selection
   const filteredAlbums = useMemo(() => {
     if (selectedSubCategory === "All") return albums;
     return albums.filter((a) => {
@@ -85,12 +99,39 @@ export default function CategoryGalleryView({
   };
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 pb-20 relative select-none">
-      {/* Background Radial Glow */}
-      <div className="pointer-events-none fixed inset-0 z-0 bg-radial from-blue-950/20 via-neutral-950/80 to-neutral-950" />
+    <div className="min-h-screen bg-neutral-950 text-neutral-100 pb-20 relative select-none overflow-hidden">
+      {/* Sport-Specific Randomized Mosaic Backdrop */}
+      {sportMosaicPhotos.length > 0 && (
+        <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden opacity-30 select-none">
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2.5 sm:gap-3.5 p-3 -rotate-1 scale-105 filter saturate-75 contrast-110">
+            {sportMosaicPhotos.map((item, idx) => (
+              <div
+                key={`${item.url}-${idx}`}
+                className={`rounded-xl overflow-hidden bg-neutral-900 border border-white/5 ${
+                  idx % 3 === 0
+                    ? "aspect-4/3"
+                    : idx % 2 === 0
+                    ? "aspect-square"
+                    : "aspect-3/4"
+                }`}
+              >
+                <img
+                  src={item.url}
+                  alt=""
+                  className="w-full h-full object-cover"
+                  style={getFocalPointStyle(item.focal_point)}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Layered Vignette */}
+      <div className="pointer-events-none fixed inset-0 z-0 bg-radial from-transparent via-neutral-950/50 to-neutral-950" />
+      <div className="pointer-events-none fixed inset-0 z-0 bg-gradient-to-t from-neutral-950 via-neutral-950/60 to-neutral-950/80" />
 
       <div className="relative z-10">
-        {/* Header */}
         <header className="border-b border-neutral-800/80 sticky top-0 z-30 bg-neutral-950/80 backdrop-blur-md">
           <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
             <Link
@@ -125,7 +166,6 @@ export default function CategoryGalleryView({
         </header>
 
         <main className="max-w-7xl mx-auto px-6 pt-10 space-y-12">
-          {/* Title Banner */}
           <div className="space-y-2 border-b border-neutral-800/80 pb-6">
             <span className="text-xs font-semibold uppercase tracking-wider text-blue-400 font-mono block">
               Sport Archive
@@ -135,7 +175,7 @@ export default function CategoryGalleryView({
             </h1>
           </div>
 
-          {/* Sub-Category Portals (Secondary Bubble Row) */}
+          {/* Sub-Category Portals */}
           {subCategories.length > 1 && (
             <div className="flex flex-col items-center space-y-3">
               <span className="text-xs font-mono text-neutral-400 uppercase tracking-widest">
@@ -166,6 +206,7 @@ export default function CategoryGalleryView({
                               src={coverUrl}
                               alt={subCat}
                               className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
+                              style={getFocalPointStyle()}
                             />
                           ) : (
                             <div className="w-full h-full flex items-center justify-center text-neutral-600 bg-neutral-900">
@@ -194,7 +235,7 @@ export default function CategoryGalleryView({
             </div>
           )}
 
-          {/* Album Cards Grid */}
+          {/* Album Cards */}
           {filteredAlbums.length === 0 ? (
             <div className="text-center py-20 border border-dashed border-neutral-800 rounded-2xl">
               <Folder className="mx-auto text-neutral-600 mb-3" size={36} />
@@ -203,7 +244,7 @@ export default function CategoryGalleryView({
               </p>
               <button
                 onClick={() => setSelectedSubCategory("All")}
-                className="mt-3 px-4 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-blue-400 text-xs font-mono transition"
+                className="mt-3 px-4 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-blue-400 text-xs font-mono transition cursor-pointer"
               >
                 View all {sportTitle} albums
               </button>
@@ -214,7 +255,7 @@ export default function CategoryGalleryView({
                 <Link
                   key={album.id}
                   href={`/album/${album.id}`}
-                  className="group relative rounded-2xl overflow-hidden border border-neutral-800/80 hover:border-blue-500/50 bg-neutral-900/60 hover:bg-neutral-900/95 backdrop-blur-sm transition-all duration-300 flex flex-col shadow-xl hover:shadow-2xl hover:shadow-blue-950/40"
+                  className="group relative rounded-2xl overflow-hidden border border-neutral-800/80 hover:border-blue-500/50 bg-neutral-900/70 hover:bg-neutral-900/95 backdrop-blur-sm transition-all duration-300 flex flex-col shadow-xl hover:shadow-2xl hover:shadow-blue-950/40"
                 >
                   <div className="relative aspect-4/3 overflow-hidden bg-neutral-900">
                     {album.cover_url ? (
@@ -222,6 +263,7 @@ export default function CategoryGalleryView({
                         src={album.cover_url}
                         alt={album.title}
                         className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
+                        style={getFocalPointStyle(album.focal_point)}
                       />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-neutral-700">

@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { Folder, Calendar, Layers, ArrowRight, Coffee, Sliders } from "lucide-react";
 import SupportModal, { FundType } from "@/components/SupportModal";
+import { shuffleArray, getFocalPointStyle } from "@/lib/imageRandomizer";
 
 export interface AlbumSummary {
   id: string;
@@ -12,6 +13,7 @@ export interface AlbumSummary {
   category?: string;
   photo_count: number;
   cover_url: string;
+  focal_point?: string;
 }
 
 export interface SiteConfig {
@@ -73,19 +75,45 @@ export default function HomeGalleryView({
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [supportFund, setSupportFund] = useState<FundType>("gear");
 
-  const coverPhotos = albums
-    .filter((a) => Boolean(a.cover_url))
-    .map((a) => getHighResCoverUrl(a.cover_url));
+  // 1. Session Storage Check for Linear Navigation (skips splash if returning from album/category)
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const entered = sessionStorage.getItem("beck_entered_gallery");
+      if (entered === "true") {
+        setShowSplash(false);
+      }
+    }
+  }, []);
 
-  const mosaicPhotos = useMemo(() => {
-    if (coverPhotos.length === 0) return [];
-    const tiles: string[] = [];
+  // 2. Extract and Randomize Splash Hero Covers
+  const randomizedSplashPhotos = useMemo(() => {
+    const rawCovers = albums
+      .filter((a) => Boolean(a.cover_url))
+      .map((a) => ({
+        url: getHighResCoverUrl(a.cover_url),
+        focal_point: a.focal_point,
+      }));
+    return shuffleArray(rawCovers);
+  }, [albums]);
+
+  // 3. Extract and Randomize Mosaic Backdrop Tiles
+  const randomizedMosaicPhotos = useMemo(() => {
+    const rawCovers = albums
+      .filter((a) => Boolean(a.cover_url))
+      .map((a) => ({
+        url: getHighResCoverUrl(a.cover_url),
+        focal_point: a.focal_point,
+      }));
+    if (rawCovers.length === 0) return [];
+
+    let tiles = shuffleArray(rawCovers);
     while (tiles.length < 24) {
-      tiles.push(...coverPhotos);
+      tiles = [...tiles, ...shuffleArray(rawCovers)];
     }
     return tiles.slice(0, 24);
-  }, [coverPhotos]);
+  }, [albums]);
 
+  // Load Saved Brightness
   useEffect(() => {
     const savedSplash = localStorage.getItem("beck_splash_opacity");
     if (savedSplash) setSplashOpacity(Number(savedSplash));
@@ -104,15 +132,32 @@ export default function HomeGalleryView({
     localStorage.setItem("beck_mosaic_opacity", String(val));
   };
 
+  // Splash Carousel Rotation
   useEffect(() => {
-    if (!showSplash || coverPhotos.length <= 1) return;
+    if (!showSplash || randomizedSplashPhotos.length <= 1) return;
 
     const interval = setInterval(() => {
-      setCurrentCoverIndex((prev) => (prev + 1) % coverPhotos.length);
+      setCurrentCoverIndex((prev) => (prev + 1) % randomizedSplashPhotos.length);
     }, 7000);
 
     return () => clearInterval(interval);
-  }, [showSplash, coverPhotos.length]);
+  }, [showSplash, randomizedSplashPhotos.length]);
+
+  const handleEnterGallery = () => {
+    setShowTuner(false);
+    setShowSplash(false);
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("beck_entered_gallery", "true");
+    }
+  };
+
+  const handleReturnToSplash = () => {
+    setShowTuner(false);
+    setShowSplash(true);
+    if (typeof window !== "undefined") {
+      sessionStorage.removeItem("beck_entered_gallery");
+    }
+  };
 
   const openSupport = (fund: FundType = "gear") => {
     setSupportFund(fund);
@@ -133,13 +178,13 @@ export default function HomeGalleryView({
 
   return (
     <div className="relative min-h-screen bg-black text-neutral-100 overflow-x-hidden select-none">
-      {/* ----------------- SPLASH SCREEN ----------------- */}
+      {/* ----------------- RANDOMIZED SPLASH SCREEN ----------------- */}
       {showSplash && (
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-between p-8 md:p-14 bg-black overflow-hidden">
-          {coverPhotos.length > 0 ? (
-            coverPhotos.map((url, idx) => (
+          {randomizedSplashPhotos.length > 0 ? (
+            randomizedSplashPhotos.map((item, idx) => (
               <div
-                key={url}
+                key={`${item.url}-${idx}`}
                 className={`absolute inset-0 transition-opacity duration-1000 ease-in-out ${
                   idx === currentCoverIndex ? "pointer-events-auto" : "pointer-events-none"
                 }`}
@@ -148,9 +193,10 @@ export default function HomeGalleryView({
                 }}
               >
                 <img
-                  src={url}
+                  src={item.url}
                   alt="Gallery Feature"
-                  className="w-full h-full object-cover object-center"
+                  className="w-full h-full object-cover"
+                  style={getFocalPointStyle(item.focal_point)}
                   loading={idx === 0 ? "eager" : "lazy"}
                 />
               </div>
@@ -192,10 +238,7 @@ export default function HomeGalleryView({
 
             <div className="flex flex-col items-center gap-4">
               <button
-                onClick={() => {
-                  setShowTuner(false);
-                  setShowSplash(false);
-                }}
+                onClick={handleEnterGallery}
                 className="group relative flex items-center gap-3 px-8 py-3.5 rounded-full bg-white/10 hover:bg-white/20 active:bg-white/25 text-white text-xs font-semibold tracking-widest uppercase backdrop-blur-xl border border-white/25 hover:border-white/40 shadow-[0_8px_32px_0_rgba(0,0,0,0.5),inset_0_1px_1px_0_rgba(255,255,255,0.4)] transition-all duration-300 hover:scale-105 active:scale-95 cursor-pointer"
               >
                 <span>Enter Gallery</span>
@@ -223,18 +266,18 @@ export default function HomeGalleryView({
         </div>
       )}
 
-      {/* ----------------- DIRECTORY VIEW ----------------- */}
+      {/* ----------------- DIRECTORY VIEW WITH RANDOMIZED MOSAIC ----------------- */}
       <div className="min-h-screen bg-neutral-950 relative flex flex-col justify-between overflow-hidden">
-        {/* Dynamic Photo Mosaic */}
-        {mosaicPhotos.length > 0 && (
+        {/* Randomized Collage Background with Focal Point Alignment */}
+        {randomizedMosaicPhotos.length > 0 && (
           <div
             className="pointer-events-none fixed inset-0 z-0 overflow-hidden select-none transition-opacity duration-300"
             style={{ opacity: mosaicOpacity / 100 }}
           >
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2.5 sm:gap-3.5 p-3 -rotate-1 scale-105 filter saturate-75 contrast-110">
-              {mosaicPhotos.map((url, idx) => (
+              {randomizedMosaicPhotos.map((item, idx) => (
                 <div
-                  key={`${url}-${idx}`}
+                  key={`${item.url}-${idx}`}
                   className={`rounded-xl overflow-hidden bg-neutral-900 border border-white/5 ${
                     idx % 3 === 0
                       ? "aspect-4/3"
@@ -243,26 +286,26 @@ export default function HomeGalleryView({
                       : "aspect-3/4"
                   }`}
                 >
-                  <img src={url} alt="" className="w-full h-full object-cover" />
+                  <img
+                    src={item.url}
+                    alt=""
+                    className="w-full h-full object-cover"
+                    style={getFocalPointStyle(item.focal_point)}
+                  />
                 </div>
               ))}
             </div>
           </div>
         )}
 
-        {/* Radial Vignette */}
         <div className="pointer-events-none fixed inset-0 z-0 bg-radial from-transparent via-neutral-950/40 to-neutral-950/90" />
         <div className="pointer-events-none fixed inset-0 z-0 bg-gradient-to-t from-neutral-950 via-transparent to-neutral-950/80" />
 
         <div className="relative z-10">
-          {/* Header */}
           <header className="border-b border-neutral-800/60 sticky top-0 z-30 bg-neutral-950/80 backdrop-blur-md">
             <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
               <button
-                onClick={() => {
-                  setShowTuner(false);
-                  setShowSplash(true);
-                }}
+                onClick={handleReturnToSplash}
                 className="font-black text-sm tracking-tighter uppercase text-white flex items-center gap-1 hover:opacity-80 transition cursor-pointer"
                 title="Return to Splash Screen"
               >
@@ -300,11 +343,9 @@ export default function HomeGalleryView({
             </div>
           </header>
 
-          {/* Main Showcase Section */}
           <main className="relative max-w-7xl mx-auto px-6 pt-10 pb-16 space-y-14">
-            {/* 1. SPORT PORTALS */}
+            {/* SPORT PORTALS */}
             <div className="flex flex-col items-center">
-              {/* Mobile Layout: 2 Columns */}
               <div className="grid grid-cols-2 gap-6 max-w-xs mx-auto md:hidden">
                 {sportCategories.map((sport) => {
                   const coverUrl = getCategoryCover(sport);
@@ -322,7 +363,12 @@ export default function HomeGalleryView({
                       <div className="relative w-32 h-32 rounded-full p-[2.5px] bg-gradient-to-b from-neutral-700 via-neutral-800 to-neutral-950 group-hover:from-blue-500 group-hover:to-cyan-400 transition-all duration-300 shadow-xl group-hover:scale-105">
                         <div className="w-full h-full rounded-full overflow-hidden bg-neutral-900 relative">
                           {coverUrl ? (
-                            <img src={coverUrl} alt={sport} className="w-full h-full object-cover" />
+                            <img
+                              src={coverUrl}
+                              alt={sport}
+                              className="w-full h-full object-cover"
+                              style={getFocalPointStyle()}
+                            />
                           ) : (
                             <div className="w-full h-full flex items-center justify-center text-neutral-600 bg-neutral-900">
                               <Folder size={28} />
@@ -345,7 +391,6 @@ export default function HomeGalleryView({
                 })}
               </div>
 
-              {/* Desktop Layout: Single Horizontal Row */}
               <div className="hidden md:flex md:flex-row md:flex-nowrap md:justify-center md:items-center md:gap-10 lg:gap-14 w-full">
                 {sportCategories.map((sport) => {
                   const coverUrl = getCategoryCover(sport);
@@ -367,6 +412,7 @@ export default function HomeGalleryView({
                               src={coverUrl}
                               alt={sport}
                               className="w-full h-full object-cover group-hover:scale-110 transition duration-700"
+                              style={getFocalPointStyle()}
                             />
                           ) : (
                             <div className="w-full h-full flex items-center justify-center text-neutral-600 bg-neutral-900">
@@ -391,7 +437,7 @@ export default function HomeGalleryView({
               </div>
             </div>
 
-            {/* 2. RECENT 3 ALBUMS CENTERPIECE */}
+            {/* RECENT 3 ALBUMS */}
             <div className="space-y-4">
               <div className="flex items-center justify-between border-b border-neutral-800/80 pb-3">
                 <span className="text-xs font-mono tracking-widest text-neutral-400 uppercase">
@@ -415,6 +461,7 @@ export default function HomeGalleryView({
                           src={album.cover_url}
                           alt={album.title}
                           className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
+                          style={getFocalPointStyle(album.focal_point)}
                         />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center text-neutral-700">
@@ -452,7 +499,44 @@ export default function HomeGalleryView({
           </main>
         </div>
 
-        {/* Footer */}
+        {/* DUAL LIVE TUNER */}
+        <div className="fixed bottom-4 left-4 z-[60]">
+          {showTuner ? (
+            <div className="flex items-center gap-3 px-3.5 py-2 rounded-xl bg-neutral-900/95 border border-neutral-700 backdrop-blur-md shadow-2xl animate-in fade-in slide-in-from-bottom-2 duration-200">
+              <span className="text-[10px] font-mono text-neutral-300 uppercase tracking-wider">
+                {showSplash ? `Hero: ${splashOpacity}%` : `Mosaic: ${mosaicOpacity}%`}
+              </span>
+              <input
+                type="range"
+                min={showSplash ? "20" : "0"}
+                max={showSplash ? "100" : "80"}
+                step="5"
+                value={showSplash ? splashOpacity : mosaicOpacity}
+                onChange={(e) =>
+                  showSplash
+                    ? handleSplashOpacityChange(Number(e.target.value))
+                    : handleMosaicOpacityChange(Number(e.target.value))
+                }
+                className="w-24 accent-blue-500 h-1.5 bg-neutral-800 rounded-lg cursor-pointer"
+              />
+              <button
+                onClick={() => setShowTuner(false)}
+                className="text-[10px] font-mono text-neutral-400 hover:text-white px-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowTuner(true)}
+              className="p-2 rounded-xl bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-400 hover:text-white transition shadow-lg cursor-pointer"
+              title={showSplash ? "Tune Splash Hero Brightness" : "Tune Mosaic Wallpaper Brightness"}
+            >
+              <Sliders size={14} />
+            </button>
+          )}
+        </div>
+
         <footer className="border-t border-neutral-900 bg-neutral-950/80 backdrop-blur-md relative z-10">
           <div className="max-w-7xl mx-auto px-6 py-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-neutral-500 font-mono">
             <div>
@@ -478,45 +562,6 @@ export default function HomeGalleryView({
             </div>
           </div>
         </footer>
-      </div>
-
-      {/* ----------------- DUAL CONTEXTUAL LIVE TUNER (AVAILABLE ON BOTH SCREENS) ----------------- */}
-      <div className="fixed bottom-4 left-4 z-[60]">
-        {showTuner ? (
-          <div className="flex items-center gap-3 px-3.5 py-2 rounded-xl bg-neutral-900/95 border border-neutral-700 backdrop-blur-md shadow-2xl animate-in fade-in slide-in-from-bottom-2 duration-200">
-            <span className="text-[10px] font-mono text-neutral-300 uppercase tracking-wider">
-              {showSplash ? `Hero: ${splashOpacity}%` : `Mosaic: ${mosaicOpacity}%`}
-            </span>
-            <input
-              type="range"
-              min={showSplash ? "20" : "0"}
-              max={showSplash ? "100" : "80"}
-              step="5"
-              value={showSplash ? splashOpacity : mosaicOpacity}
-              onChange={(e) =>
-                showSplash
-                  ? handleSplashOpacityChange(Number(e.target.value))
-                  : handleMosaicOpacityChange(Number(e.target.value))
-              }
-              className="w-24 accent-blue-500 h-1.5 bg-neutral-800 rounded-lg cursor-pointer"
-            >
-            </input>
-            <button
-              onClick={() => setShowTuner(false)}
-              className="text-[10px] font-mono text-neutral-400 hover:text-white px-1 cursor-pointer"
-            >
-              ✕
-            </button>
-          </div>
-        ) : (
-          <button
-            onClick={() => setShowTuner(true)}
-            className="p-2 rounded-xl bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-400 hover:text-white transition shadow-lg cursor-pointer"
-            title={showSplash ? "Tune Splash Hero Brightness" : "Tune Mosaic Wallpaper Brightness"}
-          >
-            <Sliders size={14} />
-          </button>
-        )}
       </div>
 
       <SupportModal
