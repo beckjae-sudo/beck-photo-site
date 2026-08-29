@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import SupportModal, { FundType } from "@/components/SupportModal";
 import ShareModal from "@/components/ShareModal";
+import ViewerPresenceBadge from "@/components/ViewerPresenceBadge";
 
 interface Photo {
   id: string;
@@ -345,7 +346,7 @@ export default function PublicAlbumView() {
       </header>
 
       <main className="max-w-7xl mx-auto px-6 pt-10 space-y-8">
-        <div className="space-y-2">
+        <div className="space-y-3">
           {viewerName && (
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono bg-blue-950/60 border border-blue-800/80 text-blue-300">
               <span>👋 Welcome, {viewerName}!</span>
@@ -358,12 +359,18 @@ export default function PublicAlbumView() {
             </span>
           )}
           <h1 className="text-3xl md:text-4xl font-extrabold text-white">{album.title}</h1>
-          {album.date && (
-            <div className="flex items-center gap-1.5 text-xs text-neutral-400 font-mono">
-              <Calendar size={13} />
-              <span>{album.date}</span>
-            </div>
-          )}
+
+          <div className="flex flex-wrap items-center justify-between gap-4 pt-1 border-b border-neutral-800/60 pb-4">
+            {album.date && (
+              <div className="flex items-center gap-1.5 text-xs text-neutral-400 font-mono">
+                <Calendar size={13} />
+                <span>{album.date}</span>
+              </div>
+            )}
+
+            {/* Combined Avatar Roster & Name Badge */}
+            <ViewerPresenceBadge albumId={albumId} />
+          </div>
         </div>
 
         {/* Dynamic Aspect Ratio Masonry Grid */}
