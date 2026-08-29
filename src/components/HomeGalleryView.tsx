@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { Folder, Calendar, Layers, ArrowRight, Coffee } from "lucide-react";
 import SupportModal, { FundType } from "@/components/SupportModal";
@@ -71,6 +71,16 @@ export default function HomeGalleryView({
   const coverPhotos = albums
     .filter((a) => Boolean(a.cover_url))
     .map((a) => getHighResCoverUrl(a.cover_url));
+
+  // Build a populated array of covers for the background mosaic (at least 24 tiles)
+  const mosaicPhotos = useMemo(() => {
+    if (coverPhotos.length === 0) return [];
+    const tiles: string[] = [];
+    while (tiles.length < 24) {
+      tiles.push(...coverPhotos);
+    }
+    return tiles.slice(0, 24);
+  }, [coverPhotos]);
 
   useEffect(() => {
     if (!showSplash || coverPhotos.length <= 1) return;
@@ -185,14 +195,38 @@ export default function HomeGalleryView({
         </div>
       )}
 
-      {/* ----------------- MINIMAL DIRECTORY VIEW ----------------- */}
+      {/* ----------------- MAIN DIRECTORY VIEW WITH ARTISAN MOSAIC ----------------- */}
       <div className="min-h-screen bg-neutral-950 relative flex flex-col justify-between overflow-hidden">
-        {/* Subtle Ambient Radial Glow */}
-        <div className="pointer-events-none absolute inset-0 bg-radial from-blue-950/20 via-neutral-950/80 to-neutral-950" />
+        {/* 1. Artistic Photo Mosaic Backdrop */}
+        {mosaicPhotos.length > 0 && (
+          <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden opacity-[0.16] select-none">
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2 sm:gap-3 p-3 -rotate-1 scale-110 filter saturate-50 contrast-125">
+              {mosaicPhotos.map((url, idx) => (
+                <div
+                  key={`${url}-${idx}`}
+                  className={`rounded-xl overflow-hidden bg-neutral-900 ${
+                    idx % 3 === 0
+                      ? "aspect-4/3"
+                      : idx % 2 === 0
+                      ? "aspect-square"
+                      : "aspect-3/4"
+                  }`}
+                >
+                  <img src={url} alt="" className="w-full h-full object-cover" />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
-        <div>
+        {/* 2. Layered Vignette & Dark Atmosphere */}
+        <div className="pointer-events-none fixed inset-0 z-0 bg-radial from-transparent via-neutral-950/70 to-neutral-950" />
+        <div className="pointer-events-none fixed inset-0 z-0 bg-gradient-to-t from-neutral-950 via-neutral-950/50 to-neutral-950/90" />
+        <div className="pointer-events-none fixed inset-0 z-0 bg-blue-950/10 mix-blend-screen" />
+
+        <div className="relative z-10">
           {/* Header */}
-          <header className="border-b border-neutral-800/60 sticky top-0 z-30 bg-neutral-950/75 backdrop-blur-md">
+          <header className="border-b border-neutral-800/60 sticky top-0 z-30 bg-neutral-950/80 backdrop-blur-md">
             <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
               <button
                 onClick={() => setShowSplash(true)}
@@ -235,7 +269,7 @@ export default function HomeGalleryView({
 
           {/* Main Content Showcase */}
           <main className="relative max-w-7xl mx-auto px-6 pt-10 pb-16 space-y-14">
-            {/* 1. ENLARGED SPORT PORTALS (2-Row Mobile Grid / High-Impact Desktop Row) */}
+            {/* 1. Scaled Sport Portals (2-Row Mobile / Center Desktop) */}
             <div className="flex flex-col items-center">
               <div className="grid grid-cols-2 sm:grid-cols-4 md:flex md:flex-wrap md:justify-center md:items-center gap-6 sm:gap-8 md:gap-12 w-full max-w-5xl">
                 {sportCategories.map((sport) => {
@@ -284,7 +318,7 @@ export default function HomeGalleryView({
               </div>
             </div>
 
-            {/* 2. RECENT 3 ALBUMS CENTERPIECE */}
+            {/* 2. Recent 3 Albums Centerpiece */}
             <div className="space-y-4">
               <div className="flex items-center justify-between border-b border-neutral-800/80 pb-3">
                 <span className="text-xs font-mono tracking-widest text-neutral-400 uppercase">
@@ -300,7 +334,7 @@ export default function HomeGalleryView({
                   <Link
                     key={album.id}
                     href={`/album/${album.id}`}
-                    className="group relative rounded-2xl overflow-hidden border border-neutral-800/80 hover:border-blue-500/50 bg-neutral-900/40 hover:bg-neutral-900/80 transition-all duration-300 flex flex-col shadow-lg hover:shadow-2xl hover:shadow-blue-950/20"
+                    className="group relative rounded-2xl overflow-hidden border border-neutral-800/80 hover:border-blue-500/50 bg-neutral-900/60 hover:bg-neutral-900/90 backdrop-blur-sm transition-all duration-300 flex flex-col shadow-xl hover:shadow-2xl hover:shadow-blue-950/30"
                   >
                     <div className="relative aspect-4/3 overflow-hidden bg-neutral-900">
                       {album.cover_url ? (
@@ -346,7 +380,7 @@ export default function HomeGalleryView({
         </div>
 
         {/* Footer */}
-        <footer className="border-t border-neutral-900 bg-neutral-950/60">
+        <footer className="border-t border-neutral-900 bg-neutral-950/80 backdrop-blur-md relative z-10">
           <div className="max-w-7xl mx-auto px-6 py-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-neutral-500 font-mono">
             <div>
               <span>BECK / PHOTO © {new Date().getFullYear()}</span>
