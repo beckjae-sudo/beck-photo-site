@@ -75,7 +75,7 @@ export default function HomeGalleryView({
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [supportFund, setSupportFund] = useState<FundType>("gear");
 
-  // 1. Session Storage Check for Linear Navigation (skips splash if returning from album/category)
+  // 1. Session Storage Check for Linear Navigation
   useEffect(() => {
     if (typeof window !== "undefined") {
       const entered = sessionStorage.getItem("beck_entered_gallery");
@@ -85,33 +85,41 @@ export default function HomeGalleryView({
     }
   }, []);
 
-  // 2. Extract and Randomize Splash Hero Covers
-  const randomizedSplashPhotos = useMemo(() => {
-    const rawCovers = albums
+  // 2. Base Un-shuffled Arrays (Deterministic for Server-Side Rendering)
+  const baseSplashPhotos = useMemo(() => {
+    return albums
       .filter((a) => Boolean(a.cover_url))
       .map((a) => ({
         url: getHighResCoverUrl(a.cover_url),
         focal_point: a.focal_point,
       }));
-    return shuffleArray(rawCovers);
   }, [albums]);
 
-  // 3. Extract and Randomize Mosaic Backdrop Tiles
-  const randomizedMosaicPhotos = useMemo(() => {
-    const rawCovers = albums
-      .filter((a) => Boolean(a.cover_url))
-      .map((a) => ({
-        url: getHighResCoverUrl(a.cover_url),
-        focal_point: a.focal_point,
-      }));
-    if (rawCovers.length === 0) return [];
-
-    let tiles = shuffleArray(rawCovers);
+  const baseMosaicPhotos = useMemo(() => {
+    if (baseSplashPhotos.length === 0) return [];
+    let tiles = [...baseSplashPhotos];
     while (tiles.length < 24) {
-      tiles = [...tiles, ...shuffleArray(rawCovers)];
+      tiles = [...tiles, ...baseSplashPhotos];
     }
     return tiles.slice(0, 24);
-  }, [albums]);
+  }, [baseSplashPhotos]);
+
+  // 3. Active Photo State (Matches your existing JSX references)
+  const [randomizedSplashPhotos, setRandomizedSplashPhotos] = useState(baseSplashPhotos);
+  const [randomizedMosaicPhotos, setRandomizedMosaicPhotos] = useState(baseMosaicPhotos);
+
+  // 4. Randomize on Client ONLY After Mount (Fixes Hydration Error)
+  useEffect(() => {
+    if (baseSplashPhotos.length === 0) return;
+
+    setRandomizedSplashPhotos(shuffleArray(baseSplashPhotos));
+
+    let tiles = shuffleArray(baseSplashPhotos);
+    while (tiles.length < 24) {
+      tiles = [...tiles, ...shuffleArray(baseSplashPhotos)];
+    }
+    setRandomizedMosaicPhotos(tiles.slice(0, 24));
+  }, [baseSplashPhotos]);
 
   // Load Saved Brightness
   useEffect(() => {
