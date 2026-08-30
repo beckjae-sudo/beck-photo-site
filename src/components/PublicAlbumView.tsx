@@ -68,7 +68,7 @@ export default function PublicAlbumView() {
   const [isZipping, setIsZipping] = useState(false);
   const [zipProgress, setZipProgress] = useState({ current: 0, total: 0, percent: 0 });
 
-  // Fullscreen, Touch & Swipe Gesture State
+  // Fullscreen, Touch, Pan & Pinch Zoom State
   const [isImmersive, setIsImmersive] = useState(false);
   const [navCue, setNavCue] = useState<"both" | "left" | "right" | "none">("none");
   const [showExitPrompt, setShowExitPrompt] = useState(false);
@@ -76,20 +76,25 @@ export default function PublicAlbumView() {
   const [isSwiping, setIsSwiping] = useState<boolean>(false);
 
   const [zoomScale, setZoomScale] = useState(1);
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const pinchStartScale = useRef<number>(1);
   const initialPinchDistance = useRef<number | null>(null);
+  const panStart = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const lastTapTime = useRef<number>(0);
-
-  // Reset zoom when navigating between photos or exiting
-  useEffect(() => {
-    setZoomScale(1);
-  }, [selectedIndex]);
 
   const touchStartX = useRef<number | null>(null);
   const touchStartY = useRef<number | null>(null);
   const cueTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const exitPromptTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Distance helper for pinch calculations
+  // Reset zoom & pan when navigating between photos or closing
+  useEffect(() => {
+    setZoomScale(1);
+    setPanOffset({ x: 0, y: 0 });
+    setDragOffset(0);
+  }, [selectedIndex]);
+
+  // Distance helper for pinch-to-zoom
   const getTouchDistance = (e: React.TouchEvent) => {
     if (e.touches.length < 2) return null;
     const dx = e.touches[0].clientX - e.touches[1].clientX;
@@ -100,50 +105,82 @@ export default function PublicAlbumView() {
   const handleTouchStart = (e: React.TouchEvent) => {
     // 1. Two-finger pinch start
     if (e.touches.length === 2) {
-      initialPinchDistance.current = getTouchDistance(e);
+      const dist = getTouchDistance(e);
+      initialPinchDistance.current = dist;
+      pinchStartScale.current = zoomScale;
       setIsSwiping(false);
       setDragOffset(0);
       return;
     }
 
-    // 2. Double-tap to zoom toggle (1x <-> 2x)
-    const now = Date.now();
-    if (now - lastTapTime.current < 300 && e.touches.length === 1) {
-      setZoomScale((prev) => (prev > 1 ? 1 : 2));
-      lastTapTime.current = 0;
-      return;
-    }
-    lastTapTime.current = now;
+    // 2. Single-finger touch
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      const now = Date.now();
 
-    // 3. Single-finger swipe start (only when unzoomed)
-    if (zoomScale === 1) {
-      touchStartX.current = e.touches[0].clientX;
-      touchStartY.current = e.touches[0].clientY;
-      setIsSwiping(true);
+      // Double-tap to zoom toggle (1x <-> 2.5x)
+      if (now - lastTapTime.current < 300) {
+        lastTapTime.current = 0;
+        if (zoomScale > 1) {
+          setZoomScale(1);
+          setPanOffset({ x: 0, y: 0 });
+        } else {
+          setZoomScale(2.5);
+        }
+        setIsSwiping(false);
+        setDragOffset(0);
+        return;
+      }
+      lastTapTime.current = now;
+
+      touchStartX.current = touch.clientX;
+      touchStartY.current = touch.clientY;
+
+      if (zoomScale > 1) {
+        panStart.current = {
+          x: touch.clientX - panOffset.x,
+          y: touch.clientY - panOffset.y,
+        };
+      } else {
+        setIsSwiping(true);
+      }
     }
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    // Handle 2-finger active pinch zoom
+    // Active two-finger pinch zoom
     if (e.touches.length === 2 && initialPinchDistance.current !== null) {
       const currentDist = getTouchDistance(e);
-      if (currentDist) {
+      if (currentDist && initialPinchDistance.current > 0) {
         const factor = currentDist / initialPinchDistance.current;
-        setZoomScale(Math.min(Math.max(factor, 1), 3.5));
+        const calculatedScale = Math.min(Math.max(pinchStartScale.current * factor, 1), 4);
+        setZoomScale(calculatedScale);
+        if (calculatedScale === 1) {
+          setPanOffset({ x: 0, y: 0 });
+        }
       }
       return;
     }
 
-    // Handle 1-finger horizontal photo swipe (only when unzoomed)
-    if (!isSwiping || zoomScale > 1 || touchStartX.current === null || touchStartY.current === null) return;
+    // Active single-finger touch
+    if (e.touches.length === 1) {
+      const currentX = e.touches[0].clientX;
+      const currentY = e.touches[0].clientY;
 
-    const currentX = e.touches[0].clientX;
-    const currentY = e.touches[0].clientY;
-    const deltaX = currentX - touchStartX.current;
-    const deltaY = currentY - touchStartY.current;
-
-    if (Math.abs(deltaX) > Math.abs(deltaY)) {
-      setDragOffset(deltaX * 0.75);
+      if (zoomScale > 1) {
+        // Pan within zoomed image
+        setPanOffset({
+          x: currentX - panStart.current.x,
+          y: currentY - panStart.current.y,
+        });
+      } else if (isSwiping && touchStartX.current !== null && touchStartY.current !== null) {
+        // Swipe photo horizontally
+        const deltaX = currentX - touchStartX.current;
+        const deltaY = currentY - touchStartY.current;
+        if (Math.abs(deltaX) > Math.abs(deltaY)) {
+          setDragOffset(deltaX * 0.75);
+        }
+      }
     }
   };
 
@@ -152,12 +189,13 @@ export default function PublicAlbumView() {
     setIsSwiping(false);
     setDragOffset(0);
 
-    // Snap back to 1x if pinch ended smaller than 1.05x
+    // Snap back to 1x and reset pan if pinch ended near 1x
     if (zoomScale < 1.05) {
       setZoomScale(1);
+      setPanOffset({ x: 0, y: 0 });
     }
 
-    if (zoomScale > 1) return; // Don't navigate while zoomed
+    if (zoomScale > 1) return; // Prevent photo switching while zoomed
     if (touchStartX.current === null || touchStartY.current === null) return;
 
     const endX = e.changedTouches[0].clientX;
@@ -168,7 +206,7 @@ export default function PublicAlbumView() {
     touchStartX.current = null;
     touchStartY.current = null;
 
-    // Horizontal Swipe (Next / Prev)
+    // Horizontal Swipe (Next / Prev Photo)
     if (Math.abs(deltaX) > 45 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2) {
       if (deltaX < 0) {
         showNext();
@@ -180,7 +218,7 @@ export default function PublicAlbumView() {
       return;
     }
 
-    // Swipe Down (Exit)
+    // Swipe Down (Exit Lightbox)
     if (deltaY > 55 && Math.abs(deltaY) > Math.abs(deltaX) * 1.4) {
       if (isImmersive) {
         setShowExitPrompt(true);
@@ -327,7 +365,7 @@ export default function PublicAlbumView() {
 
       const zipBlob = await zip.generateAsync({
         type: "blob",
-        compression: "STORE", // Already compressed JPEGs/WebP; store saves browser CPU time
+        compression: "STORE",
       });
 
       const blobUrl = window.URL.createObjectURL(zipBlob);
@@ -383,6 +421,15 @@ export default function PublicAlbumView() {
   const exitLightbox = async () => {
     await exitFullscreen();
     setSelectedIndex(null);
+  };
+
+  const handleBackdropClick = () => {
+    if (zoomScale > 1) {
+      setZoomScale(1);
+      setPanOffset({ x: 0, y: 0 });
+      return;
+    }
+    exitLightbox();
   };
 
   const handleDownload = async (e: React.MouseEvent, url: string, filename: string) => {
@@ -456,18 +503,6 @@ export default function PublicAlbumView() {
     if (selectedIndex === null || photos.length === 0) return;
     setSelectedIndex((prev) => (prev !== null && prev > 0 ? prev - 1 : photos.length - 1));
   }, [selectedIndex, photos.length]);
-
-  const handleFullscreenPrev = (e?: React.MouseEvent | React.TouchEvent) => {
-    if (e) e.stopPropagation();
-    showPrev();
-    triggerCue("left", 500);
-  };
-
-  const handleFullscreenNext = (e?: React.MouseEvent | React.TouchEvent) => {
-    if (e) e.stopPropagation();
-    showNext();
-    triggerCue("right", 500);
-  };
 
   useEffect(() => {
     if (selectedIndex === null) return;
@@ -698,7 +733,7 @@ export default function PublicAlbumView() {
           className={`fixed inset-0 z-50 bg-black flex items-center justify-center select-none overflow-hidden touch-none ${
             isImmersive ? "w-screen h-[100dvh]" : "bg-black/95 backdrop-blur-md"
           }`}
-          onClick={exitLightbox}
+          onClick={handleBackdropClick}
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
@@ -784,11 +819,12 @@ export default function PublicAlbumView() {
                 </>
               )}
 
-              {/* Standard Photo Display with Swipe Tracking */}
+              {/* Standard Photo Display with Pinch & Pan Physics */}
               <div
-                className="max-h-[85vh] max-w-[85vw] flex items-center justify-center transition-transform ease-out duration-100"
+                className="max-h-[85vh] max-w-[85vw] flex items-center justify-center transition-transform ease-out"
                 style={{
-                  transform: `translateX(${dragOffset}px) scale(${zoomScale})`,
+                  transform: `translateX(${dragOffset}px) scale(${zoomScale}) translate(${panOffset.x / zoomScale}px, ${panOffset.y / zoomScale}px)`,
+                  transitionDuration: isSwiping || zoomScale > 1 ? "0ms" : "150ms",
                   touchAction: "none",
                 }}
                 onClick={(e) => e.stopPropagation()}
@@ -796,7 +832,7 @@ export default function PublicAlbumView() {
                 <img
                   src={selectedPhoto.urls.display}
                   alt={selectedPhoto.original_filename}
-                  className="max-h-[85vh] max-w-[85vw] object-contain rounded-lg shadow-2xl pointer-events-none"
+                  className="max-h-[85vh] max-w-[85vw] object-contain rounded-lg shadow-2xl pointer-events-none select-none"
                 />
               </div>
             </>
@@ -805,9 +841,11 @@ export default function PublicAlbumView() {
           {/* Fullscreen Mode */}
           {isImmersive && (
             <div
-              className="relative w-full h-full flex items-center justify-center transition-transform ease-out duration-150"
+              className="relative w-full h-full flex items-center justify-center transition-transform ease-out"
               style={{
-                transform: `translateX(${dragOffset}px)`,
+                transform: `translateX(${dragOffset}px) scale(${zoomScale}) translate(${panOffset.x / zoomScale}px, ${panOffset.y / zoomScale}px)`,
+                transitionDuration: isSwiping || zoomScale > 1 ? "0ms" : "150ms",
+                touchAction: "none",
               }}
               onClick={(e) => e.stopPropagation()}
             >
