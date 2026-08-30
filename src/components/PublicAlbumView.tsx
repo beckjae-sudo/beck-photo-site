@@ -76,6 +76,9 @@ export default function PublicAlbumView() {
   const [showExitPrompt, setShowExitPrompt] = useState(false);
   const [dragOffset, setDragOffset] = useState<number>(0);
 
+  // High-Resolution Master Swap Tracking
+  const [loadedHighResIds, setLoadedHighResIds] = useState<Set<string>>(new Set());
+
   // Zoom and Pan (State + Refs to eliminate React closure lag)
   const [zoomScale, setZoomScale] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
@@ -94,6 +97,9 @@ export default function PublicAlbumView() {
   const cueTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const exitPromptTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  const photos = album?.photos || [];
+  const selectedPhoto = selectedIndex !== null ? photos[selectedIndex] : null;
+
   // Reset zoom & pan synchronously when changing photos or closing
   useEffect(() => {
     zoomScaleRef.current = 1;
@@ -103,6 +109,43 @@ export default function PublicAlbumView() {
     setPanOffset({ x: 0, y: 0 });
     setDragOffset(0);
   }, [selectedIndex]);
+
+  // Silent Background High-Res Master Preload
+  useEffect(() => {
+    if (selectedIndex === null || !selectedPhoto) return;
+    const photoId = selectedPhoto.id;
+    const originalUrl = selectedPhoto.urls.original;
+
+    if (!originalUrl || loadedHighResIds.has(photoId)) return;
+
+    const img = new Image();
+    img.src = originalUrl;
+    img.onload = () => {
+      setLoadedHighResIds((prev) => new Set(prev).add(photoId));
+    };
+  }, [selectedIndex, selectedPhoto, loadedHighResIds]);
+
+  // Background Image Preloader for Adjacent Slides
+  useEffect(() => {
+    if (selectedIndex === null || photos.length === 0) return;
+    const indicesToPreload = [
+      (selectedIndex + 1) % photos.length,
+      (selectedIndex + 2) % photos.length,
+      (selectedIndex - 1 + photos.length) % photos.length,
+    ];
+    indicesToPreload.forEach((idx) => {
+      if (photos[idx]?.urls?.display) {
+        const img = new Image();
+        img.src = photos[idx].urls.display;
+      }
+    });
+  }, [selectedIndex, photos]);
+
+  // Active Lightbox Photo Source (Swaps to crystal-clear original once cached)
+  const activeImageSrc =
+    selectedPhoto && loadedHighResIds.has(selectedPhoto.id)
+      ? selectedPhoto.urls.original
+      : selectedPhoto?.urls.display || "";
 
   // Touch Gestures
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -516,25 +559,6 @@ export default function PublicAlbumView() {
     setIsSupportOpen(true);
   };
 
-  const photos = album?.photos || [];
-  const selectedPhoto = selectedIndex !== null ? photos[selectedIndex] : null;
-
-  // Background Image Preloader
-  useEffect(() => {
-    if (selectedIndex === null || photos.length === 0) return;
-    const indicesToPreload = [
-      (selectedIndex + 1) % photos.length,
-      (selectedIndex + 2) % photos.length,
-      (selectedIndex - 1 + photos.length) % photos.length,
-    ];
-    indicesToPreload.forEach((idx) => {
-      if (photos[idx]?.urls?.display) {
-        const img = new Image();
-        img.src = photos[idx].urls.display;
-      }
-    });
-  }, [selectedIndex, photos]);
-
   const showNext = useCallback(() => {
     if (selectedIndex === null || photos.length === 0) return;
     setSelectedIndex((prev) => (prev !== null && prev < photos.length - 1 ? prev + 1 : 0));
@@ -856,20 +880,27 @@ export default function PublicAlbumView() {
                 </>
               )}
 
-              {/* Standard Photo Display with Hardware-Accelerated Transforms */}
+              {/* Standard Photo Display with Subpixel Hardware Rendering */}
               <div
                 className="max-h-[85vh] max-w-[85vw] flex items-center justify-center transition-transform ease-out"
                 style={{
                   transform: `translate3d(${dragOffset + panOffset.x}px, ${panOffset.y}px, 0px) scale(${zoomScale})`,
                   transitionDuration: touchMode.current !== "idle" || zoomScale > 1 ? "0ms" : "150ms",
                   touchAction: "none",
+                  willChange: "transform",
                 }}
                 onClick={(e) => e.stopPropagation()}
               >
                 <img
-                  src={selectedPhoto.urls.display}
+                  src={activeImageSrc}
                   alt={selectedPhoto.original_filename}
                   className="max-h-[85vh] max-w-[85vw] object-contain rounded-lg shadow-2xl pointer-events-none select-none"
+                  style={{
+                    backfaceVisibility: "hidden",
+                    WebkitBackfaceVisibility: "hidden",
+                    transform: "translateZ(0)",
+                    WebkitTransform: "translateZ(0)",
+                  }}
                 />
               </div>
             </>
@@ -883,13 +914,20 @@ export default function PublicAlbumView() {
                 transform: `translate3d(${dragOffset + panOffset.x}px, ${panOffset.y}px, 0px) scale(${zoomScale})`,
                 transitionDuration: touchMode.current !== "idle" || zoomScale > 1 ? "0ms" : "150ms",
                 touchAction: "none",
+                willChange: "transform",
               }}
               onClick={(e) => e.stopPropagation()}
             >
               <img
-                src={selectedPhoto.urls.display}
+                src={activeImageSrc}
                 alt={selectedPhoto.original_filename}
                 className="w-full h-full object-contain pointer-events-none select-none"
+                style={{
+                  backfaceVisibility: "hidden",
+                  WebkitBackfaceVisibility: "hidden",
+                  transform: "translateZ(0)",
+                  WebkitTransform: "translateZ(0)",
+                }}
               />
 
               <div
