@@ -75,8 +75,8 @@ export default function PublicAlbumView() {
   const [dragOffset, setDragOffset] = useState<number>(0);
   const [isSwiping, setIsSwiping] = useState<boolean>(false);
 
-  const touchStartX = useRef<number>(0);
-  const touchStartY = useRef<number>(0);
+  const touchStartX = useRef<number | null>(null);
+  const touchStartY = useRef<number | null>(null);
   const cueTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const exitPromptTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -357,15 +357,30 @@ export default function PublicAlbumView() {
     triggerCue("right", 500);
   };
 
-  // Touch Swipe Handlers
+  // Touch Swipe Handlers (Preserves pinch-to-zoom & swipe physics)
   const handleTouchStart = (e: React.TouchEvent) => {
+    // 1. If 2 or more fingers touch, abort swipe to allow native pinch-zoom
+    if (e.touches.length > 1) {
+      touchStartX.current = null;
+      touchStartY.current = null;
+      setIsSwiping(false);
+      setDragOffset(0);
+      return;
+    }
     touchStartX.current = e.touches[0].clientX;
     touchStartY.current = e.touches[0].clientY;
     setIsSwiping(true);
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (!isSwiping) return;
+    // 2. Abort immediately if multi-touch detected during movement
+    if (e.touches.length > 1) {
+      setIsSwiping(false);
+      setDragOffset(0);
+      return;
+    }
+    if (!isSwiping || touchStartX.current === null || touchStartY.current === null) return;
+
     const currentX = e.touches[0].clientX;
     const currentY = e.touches[0].clientY;
     const deltaX = currentX - touchStartX.current;
@@ -378,14 +393,21 @@ export default function PublicAlbumView() {
 
   const handleTouchEnd = (e: React.TouchEvent) => {
     setIsSwiping(false);
+    setDragOffset(0);
+
+    // If multi-touch was active or touch start was cleared, ignore swipe calculation
+    if (touchStartX.current === null || touchStartY.current === null) return;
+
     const endX = e.changedTouches[0].clientX;
     const endY = e.changedTouches[0].clientY;
     const deltaX = endX - touchStartX.current;
     const deltaY = endY - touchStartY.current;
-    const screenWidth = typeof window !== "undefined" ? window.innerWidth : 400;
 
-    setDragOffset(0);
+    // Reset touch start refs
+    touchStartX.current = null;
+    touchStartY.current = null;
 
+    // Horizontal Swipe (Next / Prev Photo)
     if (Math.abs(deltaX) > 45 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2) {
       if (deltaX < 0) {
         showNext();
@@ -397,6 +419,7 @@ export default function PublicAlbumView() {
       return;
     }
 
+    // Swipe Down (Exit Lightbox)
     if (deltaY > 55 && Math.abs(deltaY) > Math.abs(deltaX) * 1.4) {
       if (isImmersive) {
         setShowExitPrompt(true);
@@ -408,14 +431,6 @@ export default function PublicAlbumView() {
         exitLightbox();
       }
       return;
-    }
-
-    if (Math.abs(deltaX) < 12 && Math.abs(deltaY) < 12) {
-      if (endX < screenWidth * 0.35) {
-        handleFullscreenPrev();
-      } else if (endX > screenWidth * 0.65) {
-        handleFullscreenNext();
-      }
     }
   };
 
@@ -739,6 +754,7 @@ export default function PublicAlbumView() {
                 className="max-h-[85vh] max-w-[85vw] flex items-center justify-center transition-transform ease-out duration-150"
                 style={{
                   transform: `translateX(${dragOffset}px)`,
+                  touchAction: "pan-y pinch-zoom",
                 }}
                 onClick={(e) => e.stopPropagation()}
               >
