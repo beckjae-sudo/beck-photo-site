@@ -599,12 +599,17 @@ export default function PublicAlbumView() {
     <div className="min-h-screen bg-neutral-950 text-neutral-100 pb-28 relative select-none">
       <header className="border-b border-neutral-800/80 sticky top-0 z-30 bg-neutral-950/80 backdrop-blur-md">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <Link
-            href="/"
-            className="inline-flex items-center gap-2 text-xs font-semibold text-neutral-400 hover:text-white transition"
-          >
-            <ArrowLeft size={14} /> Back to Galleries
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/"
+              className="inline-flex items-center gap-2 text-xs font-semibold text-neutral-400 hover:text-white transition"
+            >
+              <ArrowLeft size={14} /> Back to Galleries
+            </Link>
+            <span className="text-[10px] bg-red-600 text-white px-2 py-0.5 rounded font-mono font-bold tracking-wide">
+              BUILD: GESTURE-V2
+            </span>
+          </div>
 
           <div className="flex items-center gap-2.5">
             {/* Download Full Album Button */}
