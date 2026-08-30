@@ -49,6 +49,8 @@ interface AlbumData {
   photos: Photo[];
 }
 
+type TouchMode = "idle" | "swiping" | "pinching" | "panning";
+
 export default function PublicAlbumView() {
   const params = useParams();
   const searchParams = useSearchParams();
@@ -68,115 +70,128 @@ export default function PublicAlbumView() {
   const [isZipping, setIsZipping] = useState(false);
   const [zipProgress, setZipProgress] = useState({ current: 0, total: 0, percent: 0 });
 
-  // Fullscreen, Touch, Pan & Pinch Zoom State
+  // Fullscreen, Drag, Pan & Pinch Zoom State
   const [isImmersive, setIsImmersive] = useState(false);
   const [navCue, setNavCue] = useState<"both" | "left" | "right" | "none">("none");
   const [showExitPrompt, setShowExitPrompt] = useState(false);
   const [dragOffset, setDragOffset] = useState<number>(0);
-  const [isSwiping, setIsSwiping] = useState<boolean>(false);
 
+  // Zoom and Pan (State + Refs to eliminate React closure lag)
   const [zoomScale, setZoomScale] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
-  const pinchStartScale = useRef<number>(1);
-  const initialPinchDistance = useRef<number | null>(null);
-  const panStart = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
-  const lastTapTime = useRef<number>(0);
+  const zoomScaleRef = useRef(1);
+  const panOffsetRef = useRef({ x: 0, y: 0 });
 
-  const touchStartX = useRef<number | null>(null);
-  const touchStartY = useRef<number | null>(null);
+  // Touch Gesture Tracker State Machine
+  const touchMode = useRef<TouchMode>("idle");
+  const touchStartPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const panStart = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const pinchStartDist = useRef<number>(0);
+  const pinchStartScale = useRef<number>(1);
+  const lastTapTime = useRef<number>(0);
+  const isDoubleTap = useRef<boolean>(false);
+
   const cueTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const exitPromptTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Reset zoom & pan when navigating between photos or closing
+  // Reset zoom & pan synchronously when changing photos or closing
   useEffect(() => {
+    zoomScaleRef.current = 1;
+    panOffsetRef.current = { x: 0, y: 0 };
+    touchMode.current = "idle";
     setZoomScale(1);
     setPanOffset({ x: 0, y: 0 });
     setDragOffset(0);
   }, [selectedIndex]);
 
-  // Distance helper for pinch-to-zoom
-  const getTouchDistance = (e: React.TouchEvent) => {
-    if (e.touches.length < 2) return null;
-    const dx = e.touches[0].clientX - e.touches[1].clientX;
-    const dy = e.touches[0].clientY - e.touches[1].clientY;
-    return Math.hypot(dx, dy);
-  };
-
+  // Touch Gestures
   const handleTouchStart = (e: React.TouchEvent) => {
-    // 1. Two-finger pinch start
+    // 1. Two-finger Pinch Zoom Start
     if (e.touches.length === 2) {
-      const dist = getTouchDistance(e);
-      initialPinchDistance.current = dist;
-      pinchStartScale.current = zoomScale;
-      setIsSwiping(false);
+      touchMode.current = "pinching";
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      pinchStartDist.current = dist;
+      pinchStartScale.current = zoomScaleRef.current;
       setDragOffset(0);
       return;
     }
 
-    // 2. Single-finger touch
+    // 2. Single-finger Touch
     if (e.touches.length === 1) {
       const touch = e.touches[0];
       const now = Date.now();
 
-      // Double-tap to zoom toggle (1x <-> 2.5x)
+      // Double Tap to toggle Zoom (1x <-> 2.5x)
       if (now - lastTapTime.current < 300) {
         lastTapTime.current = 0;
-        if (zoomScale > 1) {
+        isDoubleTap.current = true;
+        touchMode.current = "idle";
+
+        if (zoomScaleRef.current > 1) {
+          zoomScaleRef.current = 1;
+          panOffsetRef.current = { x: 0, y: 0 };
           setZoomScale(1);
           setPanOffset({ x: 0, y: 0 });
         } else {
+          zoomScaleRef.current = 2.5;
           setZoomScale(2.5);
         }
-        setIsSwiping(false);
         setDragOffset(0);
         return;
       }
+
       lastTapTime.current = now;
+      isDoubleTap.current = false;
+      touchStartPos.current = { x: touch.clientX, y: touch.clientY };
 
-      touchStartX.current = touch.clientX;
-      touchStartY.current = touch.clientY;
-
-      if (zoomScale > 1) {
+      if (zoomScaleRef.current > 1.05) {
+        touchMode.current = "panning";
         panStart.current = {
-          x: touch.clientX - panOffset.x,
-          y: touch.clientY - panOffset.y,
+          x: touch.clientX - panOffsetRef.current.x,
+          y: touch.clientY - panOffsetRef.current.y,
         };
       } else {
-        setIsSwiping(true);
+        touchMode.current = "swiping";
       }
     }
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    // Active two-finger pinch zoom
-    if (e.touches.length === 2 && initialPinchDistance.current !== null) {
-      const currentDist = getTouchDistance(e);
-      if (currentDist && initialPinchDistance.current > 0) {
-        const factor = currentDist / initialPinchDistance.current;
-        const calculatedScale = Math.min(Math.max(pinchStartScale.current * factor, 1), 4);
-        setZoomScale(calculatedScale);
-        if (calculatedScale === 1) {
-          setPanOffset({ x: 0, y: 0 });
-        }
-      }
+    // Active Pinch Zoom
+    if (touchMode.current === "pinching" && e.touches.length === 2 && pinchStartDist.current > 0) {
+      const currentDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      const factor = currentDist / pinchStartDist.current;
+      const newScale = Math.min(Math.max(pinchStartScale.current * factor, 1), 4);
+      zoomScaleRef.current = newScale;
+      setZoomScale(newScale);
       return;
     }
 
-    // Active single-finger touch
+    // Active Single-finger Movement
     if (e.touches.length === 1) {
-      const currentX = e.touches[0].clientX;
-      const currentY = e.touches[0].clientY;
+      const touch = e.touches[0];
 
-      if (zoomScale > 1) {
-        // Pan within zoomed image
-        setPanOffset({
-          x: currentX - panStart.current.x,
-          y: currentY - panStart.current.y,
-        });
-      } else if (isSwiping && touchStartX.current !== null && touchStartY.current !== null) {
-        // Swipe photo horizontally
-        const deltaX = currentX - touchStartX.current;
-        const deltaY = currentY - touchStartY.current;
+      // Pan within zoomed photo
+      if (touchMode.current === "panning" && zoomScaleRef.current > 1.05) {
+        const newPan = {
+          x: touch.clientX - panStart.current.x,
+          y: touch.clientY - panStart.current.y,
+        };
+        panOffsetRef.current = newPan;
+        setPanOffset(newPan);
+        return;
+      }
+
+      // Horizontal photo swipe at 1x
+      if (touchMode.current === "swiping" && zoomScaleRef.current <= 1.05) {
+        const deltaX = touch.clientX - touchStartPos.current.x;
+        const deltaY = touch.clientY - touchStartPos.current.y;
         if (Math.abs(deltaX) > Math.abs(deltaY)) {
           setDragOffset(deltaX * 0.75);
         }
@@ -185,49 +200,74 @@ export default function PublicAlbumView() {
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
-    initialPinchDistance.current = null;
-    setIsSwiping(false);
-    setDragOffset(0);
-
-    // Snap back to 1x and reset pan if pinch ended near 1x
-    if (zoomScale < 1.05) {
-      setZoomScale(1);
-      setPanOffset({ x: 0, y: 0 });
-    }
-
-    if (zoomScale > 1) return; // Prevent photo switching while zoomed
-    if (touchStartX.current === null || touchStartY.current === null) return;
-
-    const endX = e.changedTouches[0].clientX;
-    const endY = e.changedTouches[0].clientY;
-    const deltaX = endX - touchStartX.current;
-    const deltaY = endY - touchStartY.current;
-
-    touchStartX.current = null;
-    touchStartY.current = null;
-
-    // Horizontal Swipe (Next / Prev Photo)
-    if (Math.abs(deltaX) > 45 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2) {
-      if (deltaX < 0) {
-        showNext();
-        if (isImmersive) triggerCue("right", 500);
-      } else {
-        showPrev();
-        if (isImmersive) triggerCue("left", 500);
-      }
+    if (isDoubleTap.current) {
+      isDoubleTap.current = false;
+      touchMode.current = "idle";
+      setDragOffset(0);
       return;
     }
 
-    // Swipe Down (Exit Lightbox)
-    if (deltaY > 55 && Math.abs(deltaY) > Math.abs(deltaX) * 1.4) {
-      if (isImmersive) {
-        setShowExitPrompt(true);
-        if (exitPromptTimeoutRef.current) clearTimeout(exitPromptTimeoutRef.current);
-        exitPromptTimeoutRef.current = setTimeout(() => setShowExitPrompt(false), 4000);
-      } else {
-        exitLightbox();
+    // Handle end of pinch
+    if (touchMode.current === "pinching") {
+      if (e.touches.length < 2) {
+        touchMode.current = "idle";
+        pinchStartDist.current = 0;
+        if (zoomScaleRef.current < 1.1) {
+          zoomScaleRef.current = 1;
+          panOffsetRef.current = { x: 0, y: 0 };
+          setZoomScale(1);
+          setPanOffset({ x: 0, y: 0 });
+        }
+      }
+      setDragOffset(0);
+      return;
+    }
+
+    // Handle end of pan
+    if (touchMode.current === "panning") {
+      touchMode.current = "idle";
+      setDragOffset(0);
+      return;
+    }
+
+    // Handle end of 1x swipe
+    if (touchMode.current === "swiping" && zoomScaleRef.current <= 1.05) {
+      touchMode.current = "idle";
+      setDragOffset(0);
+
+      if (e.changedTouches.length > 0) {
+        const endX = e.changedTouches[0].clientX;
+        const endY = e.changedTouches[0].clientY;
+        const deltaX = endX - touchStartPos.current.x;
+        const deltaY = endY - touchStartPos.current.y;
+
+        // Next / Prev photo (dominant horizontal swipe > 60px)
+        if (Math.abs(deltaX) > 60 && Math.abs(deltaX) > Math.abs(deltaY) * 1.5) {
+          if (deltaX < 0) {
+            showNext();
+            if (isImmersive) triggerCue("right", 500);
+          } else {
+            showPrev();
+            if (isImmersive) triggerCue("left", 500);
+          }
+          return;
+        }
+
+        // Swipe Down to exit Lightbox
+        if (deltaY > 80 && Math.abs(deltaY) > Math.abs(deltaX) * 1.5) {
+          if (isImmersive) {
+            setShowExitPrompt(true);
+            if (exitPromptTimeoutRef.current) clearTimeout(exitPromptTimeoutRef.current);
+            exitPromptTimeoutRef.current = setTimeout(() => setShowExitPrompt(false), 4000);
+          } else {
+            exitLightbox();
+          }
+        }
       }
     }
+
+    setDragOffset(0);
+    touchMode.current = "idle";
   };
 
   // Modals & Toast State
@@ -317,7 +357,7 @@ export default function PublicAlbumView() {
     }
   };
 
-  // Batch ZIP Export Generator (Concurrent chunks with progress tracking)
+  // Batch ZIP Export Generator
   const handleDownloadBatch = async (photosToDownload?: Photo[]) => {
     if (!album) return;
     const targetPhotos = photosToDownload || album.photos.filter((p) => selectedIds.has(p.id));
@@ -350,7 +390,6 @@ export default function PublicAlbumView() {
               const blob = await res.blob();
               folder.file(fileName, blob);
             } catch {
-              // Fallback to display version if original fetch is blocked
               const fallbackRes = await fetch(photo.urls.display);
               const fallbackBlob = await fallbackRes.blob();
               folder.file(fileName.replace(/\.[^.]+$/, ".webp"), fallbackBlob);
@@ -424,7 +463,9 @@ export default function PublicAlbumView() {
   };
 
   const handleBackdropClick = () => {
-    if (zoomScale > 1) {
+    if (zoomScaleRef.current > 1.05) {
+      zoomScaleRef.current = 1;
+      panOffsetRef.current = { x: 0, y: 0 };
       setZoomScale(1);
       setPanOffset({ x: 0, y: 0 });
       return;
@@ -625,7 +666,6 @@ export default function PublicAlbumView() {
                   <span>{album.date}</span>
                 </div>
               )}
-              {/* Quick Select All Toggle in Subheader */}
               <button
                 onClick={handleSelectAll}
                 className="text-xs font-mono text-neutral-400 hover:text-white transition flex items-center gap-1.5 cursor-pointer"
@@ -645,7 +685,7 @@ export default function PublicAlbumView() {
           </div>
         </div>
 
-        {/* Dynamic Aspect Ratio Masonry Grid with Favorite Hearts */}
+        {/* Dynamic Masonry Grid */}
         <div className="columns-2 sm:columns-3 md:columns-4 gap-4">
           {photos.map((photo, idx) => {
             const isFav = selectedIds.has(photo.id);
@@ -663,7 +703,6 @@ export default function PublicAlbumView() {
                   style={photo.aspect_ratio ? { aspectRatio: `${photo.aspect_ratio}` } : undefined}
                 />
 
-                {/* Persistent / Hover Heart Icon */}
                 <button
                   type="button"
                   onClick={(e) => toggleFavorite(e, photo.id)}
@@ -677,7 +716,6 @@ export default function PublicAlbumView() {
                   <Heart size={14} fill={isFav ? "currentColor" : "none"} />
                 </button>
 
-                {/* Desktop Hover Overlay */}
                 <div className="hidden sm:flex absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-200 items-center justify-center gap-2 pointer-events-none">
                   <span className="p-2 rounded-full bg-black/60 text-white backdrop-blur-md">
                     <Maximize2 size={16} />
@@ -697,7 +735,7 @@ export default function PublicAlbumView() {
         </div>
       </main>
 
-      {/* ----------------- FLOATING BATCH ACTIONS TRAY ----------------- */}
+      {/* Floating Batch Actions Bar */}
       {selectedIds.size > 0 && (
         <div className="fixed bottom-6 inset-x-0 mx-auto w-fit max-w-[92vw] z-40 animate-in fade-in slide-in-from-bottom-5 duration-200">
           <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-neutral-900/95 border border-neutral-700/80 shadow-2xl backdrop-blur-xl text-white">
@@ -727,7 +765,7 @@ export default function PublicAlbumView() {
         </div>
       )}
 
-      {/* ----------------- LIGHTBOX MODAL (STANDARD & FULLSCREEN) ----------------- */}
+      {/* Lightbox Modal */}
       {selectedPhoto !== null && selectedIndex !== null && (
         <div
           className={`fixed inset-0 z-50 bg-black flex items-center justify-center select-none overflow-hidden touch-none ${
@@ -740,13 +778,12 @@ export default function PublicAlbumView() {
         >
           {!isImmersive && (
             <>
-              {/* Lightbox Controls */}
+              {/* Top Controls */}
               <div className="absolute top-4 right-4 flex items-center gap-2.5 z-50">
                 <span className="text-xs font-mono font-medium text-neutral-400 bg-white/5 px-2.5 py-1.5 rounded-lg border border-white/10">
                   {selectedIndex + 1} / {photos.length}
                 </span>
 
-                {/* Favorite Toggle in Lightbox */}
                 <button
                   type="button"
                   onClick={(e) => toggleFavorite(e, selectedPhoto.id)}
@@ -793,7 +830,7 @@ export default function PublicAlbumView() {
                 </button>
               </div>
 
-              {/* Desktop Prev/Next Buttons */}
+              {/* Desktop Next / Prev Chevron Click Targets */}
               {photos.length > 1 && (
                 <>
                   <button
@@ -819,12 +856,12 @@ export default function PublicAlbumView() {
                 </>
               )}
 
-              {/* Standard Photo Display with Pinch & Pan Physics */}
+              {/* Standard Photo Display with Hardware-Accelerated Transforms */}
               <div
                 className="max-h-[85vh] max-w-[85vw] flex items-center justify-center transition-transform ease-out"
                 style={{
-                  transform: `translateX(${dragOffset}px) scale(${zoomScale}) translate(${panOffset.x / zoomScale}px, ${panOffset.y / zoomScale}px)`,
-                  transitionDuration: isSwiping || zoomScale > 1 ? "0ms" : "150ms",
+                  transform: `translate3d(${dragOffset + panOffset.x}px, ${panOffset.y}px, 0px) scale(${zoomScale})`,
+                  transitionDuration: touchMode.current !== "idle" || zoomScale > 1 ? "0ms" : "150ms",
                   touchAction: "none",
                 }}
                 onClick={(e) => e.stopPropagation()}
@@ -838,13 +875,13 @@ export default function PublicAlbumView() {
             </>
           )}
 
-          {/* Fullscreen Mode */}
+          {/* Fullscreen Immersive Display */}
           {isImmersive && (
             <div
               className="relative w-full h-full flex items-center justify-center transition-transform ease-out"
               style={{
-                transform: `translateX(${dragOffset}px) scale(${zoomScale}) translate(${panOffset.x / zoomScale}px, ${panOffset.y / zoomScale}px)`,
-                transitionDuration: isSwiping || zoomScale > 1 ? "0ms" : "150ms",
+                transform: `translate3d(${dragOffset + panOffset.x}px, ${panOffset.y}px, 0px) scale(${zoomScale})`,
+                transitionDuration: touchMode.current !== "idle" || zoomScale > 1 ? "0ms" : "150ms",
                 touchAction: "none",
               }}
               onClick={(e) => e.stopPropagation()}
@@ -887,7 +924,7 @@ export default function PublicAlbumView() {
         </div>
       )}
 
-      {/* ----------------- ZIP GENERATION PROGRESS MODAL ----------------- */}
+      {/* ZIP Progress Modal */}
       {isZipping && (
         <div className="fixed inset-0 z-[90] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 select-none animate-in fade-in duration-200">
           <div className="bg-neutral-950 border border-neutral-800 p-6 rounded-2xl max-w-sm w-full space-y-4 text-center shadow-2xl">
@@ -903,7 +940,6 @@ export default function PublicAlbumView() {
               </p>
             </div>
 
-            {/* Progress Bar */}
             <div className="w-full bg-neutral-900 rounded-full h-2 overflow-hidden border border-neutral-800">
               <div
                 className="bg-blue-600 h-full transition-all duration-200 rounded-full"
@@ -917,7 +953,7 @@ export default function PublicAlbumView() {
         </div>
       )}
 
-      {/* Post-Download Toast */}
+      {/* Toast */}
       {showDownloadToast && (
         <div className="fixed bottom-6 right-6 z-[70] max-w-sm w-[calc(100vw-3rem)] p-4 rounded-xl bg-neutral-900/95 backdrop-blur-md border border-neutral-700/80 text-white shadow-2xl flex flex-col gap-2.5 animate-in fade-in slide-in-from-bottom-4 duration-300">
           <div className="flex items-start justify-between gap-2">
