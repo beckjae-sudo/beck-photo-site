@@ -75,10 +75,122 @@ export default function PublicAlbumView() {
   const [dragOffset, setDragOffset] = useState<number>(0);
   const [isSwiping, setIsSwiping] = useState<boolean>(false);
 
+  const [zoomScale, setZoomScale] = useState(1);
+  const initialPinchDistance = useRef<number | null>(null);
+  const lastTapTime = useRef<number>(0);
+
+  // Reset zoom when navigating between photos or exiting
+  useEffect(() => {
+    setZoomScale(1);
+  }, [selectedIndex]);
+
   const touchStartX = useRef<number | null>(null);
   const touchStartY = useRef<number | null>(null);
   const cueTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const exitPromptTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Distance helper for pinch calculations
+  const getTouchDistance = (e: React.TouchEvent) => {
+    if (e.touches.length < 2) return null;
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    return Math.hypot(dx, dy);
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    // 1. Two-finger pinch start
+    if (e.touches.length === 2) {
+      initialPinchDistance.current = getTouchDistance(e);
+      setIsSwiping(false);
+      setDragOffset(0);
+      return;
+    }
+
+    // 2. Double-tap to zoom toggle (1x <-> 2x)
+    const now = Date.now();
+    if (now - lastTapTime.current < 300 && e.touches.length === 1) {
+      setZoomScale((prev) => (prev > 1 ? 1 : 2));
+      lastTapTime.current = 0;
+      return;
+    }
+    lastTapTime.current = now;
+
+    // 3. Single-finger swipe start (only when unzoomed)
+    if (zoomScale === 1) {
+      touchStartX.current = e.touches[0].clientX;
+      touchStartY.current = e.touches[0].clientY;
+      setIsSwiping(true);
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    // Handle 2-finger active pinch zoom
+    if (e.touches.length === 2 && initialPinchDistance.current !== null) {
+      const currentDist = getTouchDistance(e);
+      if (currentDist) {
+        const factor = currentDist / initialPinchDistance.current;
+        setZoomScale(Math.min(Math.max(factor, 1), 3.5));
+      }
+      return;
+    }
+
+    // Handle 1-finger horizontal photo swipe (only when unzoomed)
+    if (!isSwiping || zoomScale > 1 || touchStartX.current === null || touchStartY.current === null) return;
+
+    const currentX = e.touches[0].clientX;
+    const currentY = e.touches[0].clientY;
+    const deltaX = currentX - touchStartX.current;
+    const deltaY = currentY - touchStartY.current;
+
+    if (Math.abs(deltaX) > Math.abs(deltaY)) {
+      setDragOffset(deltaX * 0.75);
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    initialPinchDistance.current = null;
+    setIsSwiping(false);
+    setDragOffset(0);
+
+    // Snap back to 1x if pinch ended smaller than 1.05x
+    if (zoomScale < 1.05) {
+      setZoomScale(1);
+    }
+
+    if (zoomScale > 1) return; // Don't navigate while zoomed
+    if (touchStartX.current === null || touchStartY.current === null) return;
+
+    const endX = e.changedTouches[0].clientX;
+    const endY = e.changedTouches[0].clientY;
+    const deltaX = endX - touchStartX.current;
+    const deltaY = endY - touchStartY.current;
+
+    touchStartX.current = null;
+    touchStartY.current = null;
+
+    // Horizontal Swipe (Next / Prev)
+    if (Math.abs(deltaX) > 45 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2) {
+      if (deltaX < 0) {
+        showNext();
+        if (isImmersive) triggerCue("right", 500);
+      } else {
+        showPrev();
+        if (isImmersive) triggerCue("left", 500);
+      }
+      return;
+    }
+
+    // Swipe Down (Exit)
+    if (deltaY > 55 && Math.abs(deltaY) > Math.abs(deltaX) * 1.4) {
+      if (isImmersive) {
+        setShowExitPrompt(true);
+        if (exitPromptTimeoutRef.current) clearTimeout(exitPromptTimeoutRef.current);
+        exitPromptTimeoutRef.current = setTimeout(() => setShowExitPrompt(false), 4000);
+      } else {
+        exitLightbox();
+      }
+    }
+  };
 
   // Modals & Toast State
   const [isSupportOpen, setIsSupportOpen] = useState(false);
@@ -355,83 +467,6 @@ export default function PublicAlbumView() {
     if (e) e.stopPropagation();
     showNext();
     triggerCue("right", 500);
-  };
-
-  // Touch Swipe Handlers (Preserves pinch-to-zoom & swipe physics)
-  const handleTouchStart = (e: React.TouchEvent) => {
-    // 1. If 2 or more fingers touch, abort swipe to allow native pinch-zoom
-    if (e.touches.length > 1) {
-      touchStartX.current = null;
-      touchStartY.current = null;
-      setIsSwiping(false);
-      setDragOffset(0);
-      return;
-    }
-    touchStartX.current = e.touches[0].clientX;
-    touchStartY.current = e.touches[0].clientY;
-    setIsSwiping(true);
-  };
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    // 2. Abort immediately if multi-touch detected during movement
-    if (e.touches.length > 1) {
-      setIsSwiping(false);
-      setDragOffset(0);
-      return;
-    }
-    if (!isSwiping || touchStartX.current === null || touchStartY.current === null) return;
-
-    const currentX = e.touches[0].clientX;
-    const currentY = e.touches[0].clientY;
-    const deltaX = currentX - touchStartX.current;
-    const deltaY = currentY - touchStartY.current;
-
-    if (Math.abs(deltaX) > Math.abs(deltaY)) {
-      setDragOffset(deltaX * 0.75);
-    }
-  };
-
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    setIsSwiping(false);
-    setDragOffset(0);
-
-    // If multi-touch was active or touch start was cleared, ignore swipe calculation
-    if (touchStartX.current === null || touchStartY.current === null) return;
-
-    const endX = e.changedTouches[0].clientX;
-    const endY = e.changedTouches[0].clientY;
-    const deltaX = endX - touchStartX.current;
-    const deltaY = endY - touchStartY.current;
-
-    // Reset touch start refs
-    touchStartX.current = null;
-    touchStartY.current = null;
-
-    // Horizontal Swipe (Next / Prev Photo)
-    if (Math.abs(deltaX) > 45 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2) {
-      if (deltaX < 0) {
-        showNext();
-        if (isImmersive) triggerCue("right", 500);
-      } else {
-        showPrev();
-        if (isImmersive) triggerCue("left", 500);
-      }
-      return;
-    }
-
-    // Swipe Down (Exit Lightbox)
-    if (deltaY > 55 && Math.abs(deltaY) > Math.abs(deltaX) * 1.4) {
-      if (isImmersive) {
-        setShowExitPrompt(true);
-        if (exitPromptTimeoutRef.current) clearTimeout(exitPromptTimeoutRef.current);
-        exitPromptTimeoutRef.current = setTimeout(() => {
-          setShowExitPrompt(false);
-        }, 4000);
-      } else {
-        exitLightbox();
-      }
-      return;
-    }
   };
 
   useEffect(() => {
@@ -751,10 +786,10 @@ export default function PublicAlbumView() {
 
               {/* Standard Photo Display with Swipe Tracking */}
               <div
-                className="max-h-[85vh] max-w-[85vw] flex items-center justify-center transition-transform ease-out duration-150"
+                className="max-h-[85vh] max-w-[85vw] flex items-center justify-center transition-transform ease-out duration-100"
                 style={{
-                  transform: `translateX(${dragOffset}px)`,
-                  touchAction: "pan-y pinch-zoom",
+                  transform: `translateX(${dragOffset}px) scale(${zoomScale})`,
+                  touchAction: "none",
                 }}
                 onClick={(e) => e.stopPropagation()}
               >
