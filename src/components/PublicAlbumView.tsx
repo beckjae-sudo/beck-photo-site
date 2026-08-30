@@ -880,14 +880,14 @@ export default function PublicAlbumView() {
                 </>
               )}
 
-              {/* Standard Photo Display with Subpixel Hardware Rendering */}
+              {/* Standard Photo Display with Subpixel Precision */}
               <div
                 className="max-h-[85vh] max-w-[85vw] flex items-center justify-center transition-transform ease-out"
                 style={{
                   transform: `translate3d(${dragOffset + panOffset.x}px, ${panOffset.y}px, 0px) scale(${zoomScale})`,
                   transitionDuration: touchMode.current !== "idle" || zoomScale > 1 ? "0ms" : "150ms",
                   touchAction: "none",
-                  willChange: "transform",
+                  willChange: touchMode.current !== "idle" ? "transform" : "auto",
                 }}
                 onClick={(e) => e.stopPropagation()}
               >
@@ -896,10 +896,9 @@ export default function PublicAlbumView() {
                   alt={selectedPhoto.original_filename}
                   className="max-h-[85vh] max-w-[85vw] object-contain rounded-lg shadow-2xl pointer-events-none select-none"
                   style={{
-                    backfaceVisibility: "hidden",
+                    imageRendering: "-webkit-optimize-contrast" as any,
                     WebkitBackfaceVisibility: "hidden",
-                    transform: "translateZ(0)",
-                    WebkitTransform: "translateZ(0)",
+                    backfaceVisibility: "hidden",
                   }}
                 />
               </div>
@@ -914,7 +913,7 @@ export default function PublicAlbumView() {
                 transform: `translate3d(${dragOffset + panOffset.x}px, ${panOffset.y}px, 0px) scale(${zoomScale})`,
                 transitionDuration: touchMode.current !== "idle" || zoomScale > 1 ? "0ms" : "150ms",
                 touchAction: "none",
-                willChange: "transform",
+                willChange: touchMode.current !== "idle" ? "transform" : "auto",
               }}
               onClick={(e) => e.stopPropagation()}
             >
@@ -923,10 +922,9 @@ export default function PublicAlbumView() {
                 alt={selectedPhoto.original_filename}
                 className="w-full h-full object-contain pointer-events-none select-none"
                 style={{
-                  backfaceVisibility: "hidden",
+                  imageRendering: "-webkit-optimize-contrast" as any,
                   WebkitBackfaceVisibility: "hidden",
-                  transform: "translateZ(0)",
-                  WebkitTransform: "translateZ(0)",
+                  backfaceVisibility: "hidden",
                 }}
               />
 
