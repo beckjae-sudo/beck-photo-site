@@ -28,7 +28,15 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  Play,
 } from "lucide-react";
+
+function formatDuration(seconds?: number): string {
+  if (!seconds || isNaN(seconds)) return "";
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
 
 export default function AdminStudioView() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
@@ -118,13 +126,18 @@ export default function AdminStudioView() {
 
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
-    setUploadProgressText("Processing Retina 3K images in browser...");
+    setUploadProgressText("Processing media in browser...");
     const processedList: ProcessedPhoto[] = [];
 
     for (let i = 0; i < files.length; i++) {
-      if (files[i].type.startsWith("image/")) {
-        const item = await processImageInBrowser(files[i]);
-        processedList.push(item);
+      const file = files[i];
+      if (file.type.startsWith("image/") || file.type.startsWith("video/")) {
+        try {
+          const item = await processImageInBrowser(file);
+          processedList.push(item);
+        } catch (err: any) {
+          console.error(`Error processing file ${file.name}:`, err);
+        }
       }
     }
 
@@ -133,7 +146,6 @@ export default function AdminStudioView() {
 
     setPhotos((prev) => {
       const combined = [...prev, ...processedList];
-      // Keep overall queue chronological upon initial upload
       combined.sort((a, b) => a.timestamp - b.timestamp);
 
       if (!coverPhotoUid && combined.length > 0) {
@@ -200,7 +212,7 @@ export default function AdminStudioView() {
 
   const handleCreateAlbum = async () => {
     if (!title.trim()) return alert("Please enter an Album Title.");
-    if (photos.length === 0) return alert("Please select at least one photo.");
+    if (photos.length === 0) return alert("Please select at least one photo or video.");
 
     setIsUploading(true);
     const baseUrl = process.env.NEXT_PUBLIC_R2_BASE_URL?.replace(/\/$/, "");
@@ -213,21 +225,22 @@ export default function AdminStudioView() {
 
       const uploadedPhotosData: any[] = [];
 
-      // Uploads photos in the exact customized sequence order
       for (let i = 0; i < photos.length; i++) {
         const p = photos[i];
+        const isVideo = p.type === "video";
         const photoId = `${albumId}_${String(i + 1).padStart(3, "0")}`;
-        setUploadProgressText(`Uploading ${i + 1} of ${photos.length}...`);
+        setUploadProgressText(`Uploading ${isVideo ? "video" : "photo"} ${i + 1} of ${photos.length}...`);
 
         const thumbKey = `${albumId}/thumb/${photoId}.webp`;
         const displayKey = `${albumId}/display/${photoId}.webp`;
-        const origExt = p.originalName.substring(p.originalName.lastIndexOf("."));
+        const origExt = p.originalName.substring(p.originalName.lastIndexOf(".")) || (isVideo ? ".mp4" : ".jpg");
         const origKey = `${albumId}/original/${photoId}${origExt}`;
+        const origMime = p.file.type || (isVideo ? "video/mp4" : "image/jpeg");
 
         const [thumbRes, displayRes, origRes] = await Promise.all([
           getDirectUploadUrl(thumbKey, "image/webp"),
           getDirectUploadUrl(displayKey, "image/webp"),
-          getDirectUploadUrl(origKey, p.file.type || "image/jpeg"),
+          getDirectUploadUrl(origKey, origMime),
         ]);
 
         if (!thumbRes.success || !thumbRes.url) throw new Error(thumbRes.error || "Failed to get thumb upload URL");
@@ -237,7 +250,7 @@ export default function AdminStudioView() {
         await Promise.all([
           fetch(thumbRes.url, { method: "PUT", body: p.thumbBlob, headers: { "Content-Type": "image/webp" } }),
           fetch(displayRes.url, { method: "PUT", body: p.displayBlob, headers: { "Content-Type": "image/webp" } }),
-          fetch(origRes.url, { method: "PUT", body: p.file, headers: { "Content-Type": p.file.type || "image/jpeg" } }),
+          fetch(origRes.url, { method: "PUT", body: p.file, headers: { "Content-Type": origMime } }),
         ]);
 
         uploadedPhotosData.push({
@@ -246,6 +259,8 @@ export default function AdminStudioView() {
           width: p.width,
           height: p.height,
           aspect_ratio: p.aspectRatio,
+          type: p.type || "image",
+          duration: p.duration,
           urls: {
             thumb: `${baseUrl}/${thumbKey}`,
             display: `${baseUrl}/${displayKey}`,
@@ -278,7 +293,7 @@ export default function AdminStudioView() {
       setDate("");
       setPhotos([]);
       setCoverPhotoUid("");
-      alert("Album successfully created and published in sequence!");
+      alert("Album successfully created and published!");
       loadData();
     } catch (err: any) {
       const msg = typeof err === "string" ? err : err?.message || JSON.stringify(err);
@@ -426,7 +441,7 @@ export default function AdminStudioView() {
               <div className="flex items-center justify-between border-b border-neutral-800 pb-4">
                 <div>
                   <h2 className="text-lg font-bold text-white">Create New Album</h2>
-                  <p className="text-xs text-neutral-400">Photos are processed directly in your browser before upload</p>
+                  <p className="text-xs text-neutral-400">Photos and videos are processed in-browser before upload</p>
                 </div>
               </div>
 
@@ -476,13 +491,13 @@ export default function AdminStudioView() {
                 className="border-2 border-dashed border-neutral-800 hover:border-neutral-600 bg-neutral-950/60 rounded-xl p-8 text-center cursor-pointer transition flex flex-col items-center justify-center gap-2"
               >
                 <Upload size={28} className="text-neutral-500" />
-                <p className="text-sm font-semibold text-neutral-300">Drag &amp; drop game photos here, or click to browse</p>
-                <p className="text-xs text-neutral-500">Supports JPEG and PNG</p>
+                <p className="text-sm font-semibold text-neutral-300">Drag &amp; drop photos and videos here, or click to browse</p>
+                <p className="text-xs text-neutral-500">Supports JPEG, PNG, MP4, MOV, and WebM</p>
                 <input
                   id="album-file-input"
                   type="file"
                   multiple
-                  accept="image/jpeg,image/png"
+                  accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm"
                   className="hidden"
                   onChange={(e) => handleFiles(e.target.files)}
                 />
@@ -493,7 +508,7 @@ export default function AdminStudioView() {
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <span className="text-xs font-semibold text-neutral-200">
-                        Selected Photos ({photos.length})
+                        Selected Media ({photos.length})
                       </span>
                       <p className="text-[11px] text-neutral-400">
                         Drag cards to reorder action sequence • Hover for nudge arrows • Star sets cover
@@ -505,7 +520,7 @@ export default function AdminStudioView() {
                         type="button"
                         onClick={sortByTimestamp}
                         className="text-xs text-neutral-400 hover:text-white flex items-center gap-1 transition"
-                        title="Reset sequence to camera timestamp order"
+                        title="Reset sequence to timestamp order"
                       >
                         <Clock size={12} />
                         <span>Sort by Time</span>
@@ -520,12 +535,13 @@ export default function AdminStudioView() {
                     </div>
                   </div>
 
-                  {/* Reorderable Photo Grid */}
+                  {/* Reorderable Media Grid */}
                   <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2.5">
                     {photos.map((p, idx) => {
                       const isCover = coverPhotoUid === p.uid;
                       const isDragged = draggedIdx === idx;
                       const isDragOver = dragOverIdx === idx;
+                      const isVideo = p.type === "video";
 
                       return (
                         <div
@@ -548,7 +564,15 @@ export default function AdminStudioView() {
                             #{idx + 1}
                           </div>
 
-                          {/* Top controls: Cover Star and Delete */}
+                          {/* Video Indicator */}
+                          {isVideo && (
+                            <div className="absolute bottom-1.5 left-8 flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/75 backdrop-blur-md text-[10px] font-mono text-white pointer-events-none">
+                              <Play size={8} className="fill-white text-white" />
+                              {p.duration ? <span>{formatDuration(p.duration)}</span> : <span>VID</span>}
+                            </div>
+                          )}
+
+                          {/* Cover Star and Delete */}
                           <button
                             type="button"
                             onClick={() => setCoverPhotoUid(p.uid)}
@@ -586,7 +610,7 @@ export default function AdminStudioView() {
                                 movePhotoStep(idx, "left");
                               }}
                               className="p-1 rounded bg-black/70 hover:bg-neutral-800 disabled:opacity-30 text-white transition"
-                              title="Move photo earlier in sequence"
+                              title="Move media earlier in sequence"
                             >
                               <ChevronLeft size={12} />
                             </button>
@@ -598,7 +622,7 @@ export default function AdminStudioView() {
                                 movePhotoStep(idx, "right");
                               }}
                               className="p-1 rounded bg-black/70 hover:bg-neutral-800 disabled:opacity-30 text-white transition"
-                              title="Move photo later in sequence"
+                              title="Move media later in sequence"
                             >
                               <ChevronRight size={12} />
                             </button>
@@ -654,7 +678,7 @@ export default function AdminStudioView() {
                         </div>
                         <div className="truncate">
                           <p className="text-xs font-semibold text-white truncate">{album.title}</p>
-                          <p className="text-[11px] text-neutral-400">{album.category || "School Sports"} • {album.photo_count} photos</p>
+                          <p className="text-[11px] text-neutral-400">{album.category || "School Sports"} • {album.photo_count} items</p>
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
@@ -803,7 +827,7 @@ export default function AdminStudioView() {
         )}
       </main>
 
-      {/* ----------------- DELETE ALBUM CONFIRMATION DIALOG ----------------- */}
+      {/* Confirmation Dialog */}
       {albumToDelete && (
         <div
           className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"

@@ -14,12 +14,16 @@ import {
   GripVertical,
   ChevronLeft,
   ChevronRight,
+  Play,
 } from "lucide-react";
 import {
   getDirectUploadUrl,
   updateExistingAlbum,
   deletePhotoFromR2,
 } from "@/app/admin/actions";
+import { processImageInBrowser, ProcessedPhoto } from "@/lib/clientImageProcessor";
+
+export type MediaType = "image" | "video";
 
 interface Photo {
   id: string;
@@ -27,6 +31,8 @@ interface Photo {
   width: number;
   height: number;
   aspect_ratio: number;
+  type?: MediaType;
+  duration?: number;
   urls: {
     thumb: string;
     display: string;
@@ -44,52 +50,11 @@ interface AlbumData {
   photos: Photo[];
 }
 
-interface ProcessedFile {
-  uid: string;
-  file: File;
-  thumbBlob: Blob;
-  displayBlob: Blob;
-  width: number;
-  height: number;
-  aspectRatio: number;
-  previewUrl: string;
-  originalName: string;
-  timestamp: number;
-  metadata: any;
-}
-
-/**
- * Fast in-browser convolution filter for micro-contrast & edge sharpness.
- * Replicates Google Photos / Lightroom downsampling crispness on sports photos.
- */
-function applySharpen(ctx: CanvasRenderingContext2D, width: number, height: number, amount = 0.18) {
-  try {
-    const imgData = ctx.getImageData(0, 0, width, height);
-    const data = imgData.data;
-    const buff = new Uint8ClampedArray(data);
-
-    // 3x3 Sharpen Kernel
-    const kCenter = 1 + 4 * amount;
-    const kEdge = -amount;
-
-    for (let y = 1; y < height - 1; y++) {
-      for (let x = 1; x < width - 1; x++) {
-        const i = (y * width + x) * 4;
-        for (let c = 0; c < 3; c++) {
-          const res =
-            buff[i + c] * kCenter +
-            buff[i - 4 + c] * kEdge +
-            buff[i + 4 + c] * kEdge +
-            buff[i - width * 4 + c] * kEdge +
-            buff[i + width * 4 + c] * kEdge;
-          data[i + c] = res < 0 ? 0 : res > 255 ? 255 : res;
-        }
-      }
-    }
-    ctx.putImageData(imgData, 0, 0);
-  } catch {
-    // Graceful fallback if cross-origin or memory limits occur
-  }
+function formatDuration(seconds?: number): string {
+  if (!seconds || isNaN(seconds)) return "";
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
 export default function EditAlbumView() {
@@ -113,7 +78,7 @@ export default function EditAlbumView() {
   const [category, setCategory] = useState("School Sports");
   const [coverUrl, setCoverUrl] = useState("");
   const [photos, setPhotos] = useState<Photo[]>([]);
-  const [newPhotos, setNewPhotos] = useState<ProcessedFile[]>([]);
+  const [newPhotos, setNewPhotos] = useState<ProcessedPhoto[]>([]);
   const [photosToDelete, setPhotosToDelete] = useState<Photo[]>([]);
 
   // Drag and drop state for sequence reordering
@@ -214,137 +179,23 @@ export default function EditAlbumView() {
     });
   };
 
-  /**
-   * Retina-Grade Ingestion Pipeline (Step-down scaling + High-precision Lanczos-like smoothing + Edge unsharp)
-   */
-  const processImage = async (file: File): Promise<ProcessedFile> => {
-    return new Promise((resolve) => {
-      const img = new Image();
-      const objectUrl = URL.createObjectURL(file);
-
-      img.onload = () => {
-        const width = img.naturalWidth;
-        const height = img.naturalHeight;
-        const aspectRatio = Number((width / height).toFixed(4));
-
-        // 1. Calculate Retina 3K Display Dimensions (Max 2880px for true High-DPI screens)
-        const maxDisplay = 2880;
-        let dWidth = width;
-        let dHeight = height;
-        if (dWidth > maxDisplay || dHeight > maxDisplay) {
-          if (dWidth > dHeight) {
-            dHeight = Math.round((dHeight * maxDisplay) / dWidth);
-            dWidth = maxDisplay;
-          } else {
-            dWidth = Math.round((dWidth * maxDisplay) / dHeight);
-            dHeight = maxDisplay;
-          }
-        }
-
-        // Render Display Version with High Quality Filtering
-        const displayCanvas = document.createElement("canvas");
-        displayCanvas.width = dWidth;
-        displayCanvas.height = dHeight;
-        const dCtx = displayCanvas.getContext("2d", { willReadFrequently: true });
-
-        if (dCtx) {
-          dCtx.imageSmoothingEnabled = true;
-          dCtx.imageSmoothingQuality = "high";
-
-          // Step-down pass if scaling down by more than 2x to avoid pixel skipping
-          if (width > dWidth * 2) {
-            const stepCanvas = document.createElement("canvas");
-            stepCanvas.width = Math.round(width / 2);
-            stepCanvas.height = Math.round(height / 2);
-            const sCtx = stepCanvas.getContext("2d");
-            if (sCtx) {
-              sCtx.imageSmoothingEnabled = true;
-              sCtx.imageSmoothingQuality = "high";
-              sCtx.drawImage(img, 0, 0, stepCanvas.width, stepCanvas.height);
-              dCtx.drawImage(stepCanvas, 0, 0, dWidth, dHeight);
-            } else {
-              dCtx.drawImage(img, 0, 0, dWidth, dHeight);
-            }
-          } else {
-            dCtx.drawImage(img, 0, 0, dWidth, dHeight);
-          }
-
-          // Apply micro-contrast sharpening
-          applySharpen(dCtx, dWidth, dHeight, 0.16);
-        }
-
-        displayCanvas.toBlob(
-          (displayBlob) => {
-            // 2. Render Thumbnail Version (Max 800px)
-            const maxThumb = 800;
-            let tWidth = width;
-            let tHeight = height;
-            if (tWidth > maxThumb || tHeight > maxThumb) {
-              if (tWidth > tHeight) {
-                tHeight = Math.round((tHeight * maxThumb) / tWidth);
-                tWidth = maxThumb;
-              } else {
-                tWidth = Math.round((tWidth * maxThumb) / tHeight);
-                tHeight = maxThumb;
-              }
-            }
-
-            const thumbCanvas = document.createElement("canvas");
-            thumbCanvas.width = tWidth;
-            thumbCanvas.height = tHeight;
-            const tCtx = thumbCanvas.getContext("2d", { willReadFrequently: true });
-
-            if (tCtx) {
-              tCtx.imageSmoothingEnabled = true;
-              tCtx.imageSmoothingQuality = "high";
-              tCtx.drawImage(displayCanvas, 0, 0, tWidth, tHeight);
-              applySharpen(tCtx, tWidth, tHeight, 0.2);
-            }
-
-            thumbCanvas.toBlob(
-              (thumbBlob) => {
-                resolve({
-                  uid: Math.random().toString(36).substring(2, 9),
-                  file,
-                  thumbBlob: thumbBlob!,
-                  displayBlob: displayBlob!,
-                  width,
-                  height,
-                  aspectRatio,
-                  previewUrl: objectUrl,
-                  originalName: file.name,
-                  timestamp: file.lastModified || Date.now(),
-                  metadata: {
-                    lastModified: file.lastModified,
-                  },
-                });
-              },
-              "image/webp",
-              0.88
-            );
-          },
-          "image/webp",
-          0.92
-        );
-      };
-
-      img.src = objectUrl;
-    });
-  };
-
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;
     const files = Array.from(e.target.files);
-    const processed: ProcessedFile[] = [];
+    const processed: ProcessedPhoto[] = [];
 
     for (const f of files) {
-      const p = await processImage(f);
-      processed.push(p);
+      if (f.type.startsWith("image/") || f.type.startsWith("video/")) {
+        try {
+          const p = await processImageInBrowser(f);
+          processed.push(p);
+        } catch (err) {
+          console.error(`Error processing file ${f.name}:`, err);
+        }
+      }
     }
 
-    // Auto-sort new batch chronologically by file timestamp
     processed.sort((a, b) => a.timestamp - b.timestamp);
-
     setNewPhotos((prev) => [...prev, ...processed]);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
@@ -365,25 +216,27 @@ export default function EditAlbumView() {
     const baseUrl = process.env.NEXT_PUBLIC_R2_BASE_URL?.replace(/\/$/, "");
 
     try {
-      // 1. Upload newly added photos if any exist
+      // 1. Upload newly queued media
       const newlyUploadedPhotosData: Photo[] = [];
       const currentCount = photos.length;
 
       for (let i = 0; i < newPhotos.length; i++) {
         const p = newPhotos[i];
+        const isVideo = p.type === "video";
         const photoIndex = currentCount + i + 1;
         const photoId = `${album.album_id}_${String(photoIndex).padStart(3, "0")}`;
-        setUploadProgressText(`Uploading high-res photo ${i + 1} of ${newPhotos.length}...`);
+        setUploadProgressText(`Uploading ${isVideo ? "video" : "photo"} ${i + 1} of ${newPhotos.length}...`);
 
         const thumbKey = `${album.album_id}/thumb/${photoId}.webp`;
         const displayKey = `${album.album_id}/display/${photoId}.webp`;
-        const origExt = p.originalName.substring(p.originalName.lastIndexOf("."));
+        const origExt = p.originalName.substring(p.originalName.lastIndexOf(".")) || (isVideo ? ".mp4" : ".jpg");
         const origKey = `${album.album_id}/original/${photoId}${origExt}`;
+        const origMime = p.file.type || (isVideo ? "video/mp4" : "image/jpeg");
 
         const [thumbRes, displayRes, origRes] = await Promise.all([
           getDirectUploadUrl(thumbKey, "image/webp"),
           getDirectUploadUrl(displayKey, "image/webp"),
-          getDirectUploadUrl(origKey, p.file.type || "image/jpeg"),
+          getDirectUploadUrl(origKey, origMime),
         ]);
 
         if (!thumbRes.success || !thumbRes.url) throw new Error(thumbRes.error || "Failed to get thumb upload URL");
@@ -393,7 +246,7 @@ export default function EditAlbumView() {
         await Promise.all([
           fetch(thumbRes.url, { method: "PUT", body: p.thumbBlob, headers: { "Content-Type": "image/webp" } }),
           fetch(displayRes.url, { method: "PUT", body: p.displayBlob, headers: { "Content-Type": "image/webp" } }),
-          fetch(origRes.url, { method: "PUT", body: p.file, headers: { "Content-Type": p.file.type || "image/jpeg" } }),
+          fetch(origRes.url, { method: "PUT", body: p.file, headers: { "Content-Type": origMime } }),
         ]);
 
         newlyUploadedPhotosData.push({
@@ -402,6 +255,8 @@ export default function EditAlbumView() {
           width: p.width,
           height: p.height,
           aspect_ratio: p.aspectRatio,
+          type: p.type || "image",
+          duration: p.duration,
           urls: {
             thumb: `${baseUrl}/${thumbKey}`,
             display: `${baseUrl}/${displayKey}`,
@@ -413,7 +268,7 @@ export default function EditAlbumView() {
 
       // 2. Delete queued photos from R2 storage
       if (photosToDelete.length > 0) {
-        setUploadProgressText("Cleaning up deleted photos from storage...");
+        setUploadProgressText("Cleaning up deleted media from storage...");
         const keysToDelete: string[] = [];
         for (const p of photosToDelete) {
           const thumbKey = p.urls.thumb.replace(`${baseUrl}/`, "");
@@ -426,7 +281,6 @@ export default function EditAlbumView() {
 
       setUploadProgressText("Saving updated album manifest...");
 
-      // The new photos array preserves the user-defined drag-and-drop order
       const allPhotos = [...photos, ...newlyUploadedPhotosData];
       const finalCoverUrl = coverUrl || allPhotos[0]?.urls?.thumb || "";
 
@@ -535,24 +389,30 @@ export default function EditAlbumView() {
             ref={fileInputRef}
             type="file"
             multiple
-            accept="image/*"
+            accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm"
             onChange={handleFileSelect}
             className="hidden"
           />
           <Plus size={24} className="text-neutral-500" />
-          <p className="text-sm font-medium text-neutral-300">Add more photos to this album</p>
-          <p className="text-xs text-neutral-500">Retina 3K processing and auto-sharpening will be applied</p>
+          <p className="text-sm font-medium text-neutral-300">Add photos or videos to this album</p>
+          <p className="text-xs text-neutral-500">Supports JPEG, PNG, MP4, MOV, and WebM with Retina processing</p>
         </div>
 
         {newPhotos.length > 0 && (
           <div className="space-y-3">
             <h3 className="text-xs font-bold uppercase tracking-wider text-blue-400">
-              New Photos Queued ({newPhotos.length})
+              New Media Queued ({newPhotos.length})
             </h3>
             <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3">
               {newPhotos.map((p, idx) => (
                 <div key={p.uid} className="relative aspect-square rounded-lg overflow-hidden border border-blue-500/40 group">
                   <img src={p.previewUrl} alt="" className="w-full h-full object-cover" />
+                  {p.type === "video" && (
+                    <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/75 backdrop-blur-md text-[10px] font-mono text-white pointer-events-none">
+                      <Play size={8} className="fill-white text-white" />
+                      {p.duration ? <span>{formatDuration(p.duration)}</span> : <span>VID</span>}
+                    </div>
+                  )}
                   <button
                     onClick={() => setNewPhotos((prev) => prev.filter((_, i) => i !== idx))}
                     className="absolute top-1.5 right-1.5 p-1 bg-red-600/80 hover:bg-red-600 text-white rounded-md transition cursor-pointer"
@@ -565,15 +425,15 @@ export default function EditAlbumView() {
           </div>
         )}
 
-        {/* Existing Photos Grid with Drag-and-Drop Sequencing */}
+        {/* Existing Items Grid */}
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-300">
-                Existing Photos ({photos.length})
+                Existing Media ({photos.length})
               </h3>
               <p className="text-[11px] text-neutral-500">
-                Drag photos to reorder sequence • Hover to use nudge arrows • Click star to set cover
+                Drag cards to reorder sequence • Hover to use nudge arrows • Click star to set cover
               </p>
             </div>
           </div>
@@ -583,6 +443,7 @@ export default function EditAlbumView() {
               const isCover = coverUrl === photo.urls.thumb;
               const isDragged = draggedIdx === idx;
               const isDragOver = dragOverIdx === idx;
+              const isVideo = photo.type === "video";
 
               return (
                 <div
@@ -608,6 +469,14 @@ export default function EditAlbumView() {
                   <div className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/75 backdrop-blur-md text-[10px] font-mono font-bold text-neutral-200 pointer-events-none">
                     #{idx + 1}
                   </div>
+
+                  {/* Video Indicator */}
+                  {isVideo && (
+                    <div className="absolute bottom-1.5 left-8 flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/75 backdrop-blur-md text-[10px] font-mono text-white pointer-events-none">
+                      <Play size={8} className="fill-white text-white" />
+                      {photo.duration ? <span>{formatDuration(photo.duration)}</span> : <span>VID</span>}
+                    </div>
+                  )}
 
                   {/* Hover Grab Indicator */}
                   <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition pointer-events-none">
@@ -638,7 +507,7 @@ export default function EditAlbumView() {
                         handleMarkPhotoForDeletion(photo);
                       }}
                       className="p-1.5 rounded-md bg-black/60 text-neutral-400 hover:text-red-400 backdrop-blur-md transition cursor-pointer"
-                      title="Delete photo"
+                      title="Delete media"
                     >
                       <Trash2 size={12} />
                     </button>
@@ -654,7 +523,7 @@ export default function EditAlbumView() {
                         movePhotoStep(idx, "left");
                       }}
                       className="p-1 rounded bg-black/75 hover:bg-neutral-800 disabled:opacity-30 text-white transition cursor-pointer"
-                      title="Move photo earlier in sequence"
+                      title="Move media earlier in sequence"
                     >
                       <ChevronLeft size={12} />
                     </button>
@@ -666,7 +535,7 @@ export default function EditAlbumView() {
                         movePhotoStep(idx, "right");
                       }}
                       className="p-1 rounded bg-black/75 hover:bg-neutral-800 disabled:opacity-30 text-white transition cursor-pointer"
-                      title="Move photo later in sequence"
+                      title="Move media later in sequence"
                     >
                       <ChevronRight size={12} />
                     </button>
