@@ -2,13 +2,16 @@
 
 import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 
-interface VisitorRecord {
+export interface VisitorRecord {
   id: string;
   name: string;
   emoji: string;
   color: string;
   isCustomName: boolean;
+  firstSeen: number;
   lastSeen: number;
+  visitCount: number;
+  aliases: string[];
 }
 
 const s3 = new S3Client({
@@ -41,18 +44,27 @@ export async function logAlbumPresence(
     list = [];
   }
 
-  // Update or append visitor record
   const now = Date.now();
   const existingIdx = list.findIndex((v) => v.id === visitor.id);
 
   if (existingIdx >= 0) {
+    const existing = list[existingIdx];
+    const aliases = existing.aliases || [];
+
+    // Track name changes / alias history
+    if (existing.name && existing.name !== visitor.name && !aliases.includes(existing.name)) {
+      aliases.push(existing.name);
+    }
+
     list[existingIdx] = {
-      ...list[existingIdx],
+      ...existing,
       name: visitor.name,
       emoji: visitor.emoji,
       color: visitor.color,
       isCustomName: visitor.isCustomName,
       lastSeen: now,
+      visitCount: (existing.visitCount || 1) + 1,
+      aliases,
     };
   } else {
     list.unshift({
@@ -61,19 +73,22 @@ export async function logAlbumPresence(
       emoji: visitor.emoji,
       color: visitor.color,
       isCustomName: visitor.isCustomName,
+      firstSeen: now,
       lastSeen: now,
+      visitCount: 1,
+      aliases: [],
     });
   }
 
-  // Keep the most recent 30 visitors
-  list = list.sort((a, b) => b.lastSeen - a.lastSeen).slice(0, 30);
+  // Keep up to 300 unique visitors sorted by most recently active
+  list = list.sort((a, b) => b.lastSeen - a.lastSeen).slice(0, 300);
 
   try {
     await s3.send(
       new PutObjectCommand({
         Bucket: BUCKET,
         Key: key,
-        Body: JSON.stringify(list),
+        Body: JSON.stringify(list, null, 2),
         ContentType: "application/json",
         CacheControl: "no-cache",
       })
