@@ -11,7 +11,9 @@ import {
   Loader2,
   Save,
   AlertCircle,
-  Image as ImageIcon,
+  GripVertical,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import {
   getDirectUploadUrl,
@@ -94,7 +96,11 @@ export default function EditAlbumView() {
   const params = useParams();
   const router = useRouter();
   const rawId = params?.id;
-  const albumId = Array.isArray(rawId) ? rawId[0] : (rawId as string) || "";
+
+  // Support single-level and nested catch-all subfolder routing
+  const albumId = Array.isArray(rawId)
+    ? rawId.map((segment) => decodeURIComponent(segment)).join("/")
+    : decodeURIComponent((rawId as string) || "");
 
   const [album, setAlbum] = useState<AlbumData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -109,6 +115,10 @@ export default function EditAlbumView() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [newPhotos, setNewPhotos] = useState<ProcessedFile[]>([]);
   const [photosToDelete, setPhotosToDelete] = useState<Photo[]>([]);
+
+  // Drag and drop state for sequence reordering
+  const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -127,7 +137,12 @@ export default function EditAlbumView() {
       }
 
       try {
-        const res = await fetch(`${baseUrl}/${decodeURIComponent(albumId)}/manifest.json`, {
+        const encodedPath = albumId
+          .split("/")
+          .map((segment) => encodeURIComponent(segment))
+          .join("/");
+
+        const res = await fetch(`${baseUrl}/${encodedPath}/manifest.json`, {
           cache: "no-store",
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}: Album not found.`);
@@ -148,6 +163,56 @@ export default function EditAlbumView() {
 
     loadAlbum();
   }, [albumId]);
+
+  // Reorder Handlers for Drag and Drop
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedIdx(index);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (dragOverIdx !== index) {
+      setDragOverIdx(index);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent, targetIndex: number) => {
+    e.preventDefault();
+    if (draggedIdx === null || draggedIdx === targetIndex) {
+      setDraggedIdx(null);
+      setDragOverIdx(null);
+      return;
+    }
+
+    setPhotos((prev) => {
+      const updated = [...prev];
+      const [movedItem] = updated.splice(draggedIdx, 1);
+      updated.splice(targetIndex, 0, movedItem);
+      return updated;
+    });
+
+    setDraggedIdx(null);
+    setDragOverIdx(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedIdx(null);
+    setDragOverIdx(null);
+  };
+
+  const movePhotoStep = (fromIndex: number, direction: "left" | "right") => {
+    const toIndex = direction === "left" ? fromIndex - 1 : fromIndex + 1;
+    if (toIndex < 0 || toIndex >= photos.length) return;
+
+    setPhotos((prev) => {
+      const updated = [...prev];
+      const [movedItem] = updated.splice(fromIndex, 1);
+      updated.splice(toIndex, 0, movedItem);
+      return updated;
+    });
+  };
 
   /**
    * Retina-Grade Ingestion Pipeline (Step-down scaling + High-precision Lanczos-like smoothing + Edge unsharp)
@@ -204,13 +269,13 @@ export default function EditAlbumView() {
             dCtx.drawImage(img, 0, 0, dWidth, dHeight);
           }
 
-          // Apply micro-contrast sharpening to match Google Photos / Lightroom edge clarity
+          // Apply micro-contrast sharpening
           applySharpen(dCtx, dWidth, dHeight, 0.16);
         }
 
         displayCanvas.toBlob(
           (displayBlob) => {
-            // 2. Render Thumbnail Version (Max 800px for crisp high-density masonry grid)
+            // 2. Render Thumbnail Version (Max 800px)
             const maxThumb = 800;
             let tWidth = width;
             let tHeight = height;
@@ -361,6 +426,7 @@ export default function EditAlbumView() {
 
       setUploadProgressText("Saving updated album manifest...");
 
+      // The new photos array preserves the user-defined drag-and-drop order
       const allPhotos = [...photos, ...newlyUploadedPhotosData];
       const finalCoverUrl = coverUrl || allPhotos[0]?.urls?.thumb || "";
 
@@ -376,7 +442,7 @@ export default function EditAlbumView() {
       const res = await updateExistingAlbum(updatedAlbum);
       if (!res.success) throw new Error(res.error || "Failed to update album metadata");
 
-      alert("Album successfully updated!");
+      alert("Album sequence and details successfully updated!");
       router.push("/admin");
     } catch (err: any) {
       const msg = typeof err === "string" ? err : err?.message || JSON.stringify(err);
@@ -489,7 +555,7 @@ export default function EditAlbumView() {
                   <img src={p.previewUrl} alt="" className="w-full h-full object-cover" />
                   <button
                     onClick={() => setNewPhotos((prev) => prev.filter((_, i) => i !== idx))}
-                    className="absolute top-1.5 right-1.5 p-1 bg-red-600/80 hover:bg-red-600 text-white rounded-md transition"
+                    className="absolute top-1.5 right-1.5 p-1 bg-red-600/80 hover:bg-red-600 text-white rounded-md transition cursor-pointer"
                   >
                     <Trash2 size={12} />
                   </button>
@@ -499,29 +565,66 @@ export default function EditAlbumView() {
           </div>
         )}
 
+        {/* Existing Photos Grid with Drag-and-Drop Sequencing */}
         <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400">
-              Existing Photos ({photos.length})
-            </h3>
-            <span className="text-[11px] text-neutral-500">Click the star to set cover photo</span>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-300">
+                Existing Photos ({photos.length})
+              </h3>
+              <p className="text-[11px] text-neutral-500">
+                Drag photos to reorder sequence • Hover to use nudge arrows • Click star to set cover
+              </p>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3">
-            {photos.map((photo) => {
+            {photos.map((photo, idx) => {
               const isCover = coverUrl === photo.urls.thumb;
+              const isDragged = draggedIdx === idx;
+              const isDragOver = dragOverIdx === idx;
+
               return (
                 <div
                   key={photo.id}
-                  className={`group relative aspect-square rounded-lg overflow-hidden bg-neutral-900 border transition ${
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, idx)}
+                  onDragOver={(e) => handleDragOver(e, idx)}
+                  onDrop={(e) => handleDrop(e, idx)}
+                  onDragEnd={handleDragEnd}
+                  className={`group relative aspect-square rounded-lg overflow-hidden bg-neutral-900 border cursor-grab active:cursor-grabbing transition-all ${
                     isCover ? "border-amber-500 ring-2 ring-amber-500/30" : "border-neutral-800 hover:border-neutral-700"
+                  } ${isDragged ? "opacity-25 scale-95" : "opacity-100"} ${
+                    isDragOver ? "border-blue-500 ring-2 ring-blue-500/60 scale-105" : ""
                   }`}
                 >
-                  <img src={photo.urls.thumb} alt="" className="w-full h-full object-cover" />
-                  <div className="absolute top-1.5 right-1.5 flex gap-1">
+                  <img
+                    src={photo.urls.thumb}
+                    alt={photo.original_filename}
+                    className="w-full h-full object-cover pointer-events-none select-none"
+                  />
+
+                  {/* Sequence Position Badge */}
+                  <div className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/75 backdrop-blur-md text-[10px] font-mono font-bold text-neutral-200 pointer-events-none">
+                    #{idx + 1}
+                  </div>
+
+                  {/* Hover Grab Indicator */}
+                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition pointer-events-none">
+                    <span className="p-1 rounded-md bg-black/70 text-white backdrop-blur-sm shadow-md">
+                      <GripVertical size={14} />
+                    </span>
+                  </div>
+
+                  {/* Top-Right Controls: Star Cover & Delete */}
+                  <div className="absolute top-1.5 right-1.5 flex gap-1 z-10">
                     <button
-                      onClick={() => setCoverUrl(photo.urls.thumb)}
-                      className={`p-1.5 rounded-md backdrop-blur-md transition ${
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setCoverUrl(photo.urls.thumb);
+                      }}
+                      className={`p-1.5 rounded-md backdrop-blur-md transition cursor-pointer ${
                         isCover ? "bg-amber-500 text-black" : "bg-black/60 text-neutral-400 hover:text-white"
                       }`}
                       title="Set as cover"
@@ -529,11 +632,43 @@ export default function EditAlbumView() {
                       <Star size={12} fill={isCover ? "currentColor" : "none"} />
                     </button>
                     <button
-                      onClick={() => handleMarkPhotoForDeletion(photo)}
-                      className="p-1.5 rounded-md bg-black/60 text-neutral-400 hover:text-red-400 backdrop-blur-md transition"
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleMarkPhotoForDeletion(photo);
+                      }}
+                      className="p-1.5 rounded-md bg-black/60 text-neutral-400 hover:text-red-400 backdrop-blur-md transition cursor-pointer"
                       title="Delete photo"
                     >
                       <Trash2 size={12} />
+                    </button>
+                  </div>
+
+                  {/* Bottom-Right Step Nudge Arrows */}
+                  <div className="absolute bottom-1.5 right-1.5 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition z-10">
+                    <button
+                      type="button"
+                      disabled={idx === 0}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        movePhotoStep(idx, "left");
+                      }}
+                      className="p-1 rounded bg-black/75 hover:bg-neutral-800 disabled:opacity-30 text-white transition cursor-pointer"
+                      title="Move photo earlier in sequence"
+                    >
+                      <ChevronLeft size={12} />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={idx === photos.length - 1}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        movePhotoStep(idx, "right");
+                      }}
+                      className="p-1 rounded bg-black/75 hover:bg-neutral-800 disabled:opacity-30 text-white transition cursor-pointer"
+                      title="Move photo later in sequence"
+                    >
+                      <ChevronRight size={12} />
                     </button>
                   </div>
                 </div>

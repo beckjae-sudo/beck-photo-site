@@ -24,6 +24,10 @@ import {
   Plus,
   Image as ImageIcon,
   AlertTriangle,
+  GripVertical,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
 } from "lucide-react";
 
 export default function AdminStudioView() {
@@ -43,6 +47,10 @@ export default function AdminStudioView() {
   const [coverPhotoUid, setCoverPhotoUid] = useState<string>("");
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgressText, setUploadProgressText] = useState("");
+
+  // Drag and drop reordering state
+  const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
   const [siteConfig, setSiteConfig] = useState({
     site_title: "Sports Photo Gallery",
@@ -120,12 +128,12 @@ export default function AdminStudioView() {
       }
     }
 
-    // Sort batch by shot timestamp so sequence matches game timeline
+    // Sort new batch by shot timestamp
     processedList.sort((a, b) => a.timestamp - b.timestamp);
 
     setPhotos((prev) => {
       const combined = [...prev, ...processedList];
-      // Keep overall queue in chronological order
+      // Keep overall queue chronological upon initial upload
       combined.sort((a, b) => a.timestamp - b.timestamp);
 
       if (!coverPhotoUid && combined.length > 0) {
@@ -134,6 +142,60 @@ export default function AdminStudioView() {
       return combined;
     });
     setUploadProgressText("");
+  };
+
+  // Reorder Handlers
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedIdx(index);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (dragOverIdx !== index) {
+      setDragOverIdx(index);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent, targetIndex: number) => {
+    e.preventDefault();
+    if (draggedIdx === null || draggedIdx === targetIndex) {
+      setDraggedIdx(null);
+      setDragOverIdx(null);
+      return;
+    }
+
+    setPhotos((prev) => {
+      const updated = [...prev];
+      const [movedItem] = updated.splice(draggedIdx, 1);
+      updated.splice(targetIndex, 0, movedItem);
+      return updated;
+    });
+
+    setDraggedIdx(null);
+    setDragOverIdx(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedIdx(null);
+    setDragOverIdx(null);
+  };
+
+  const movePhotoStep = (fromIndex: number, direction: "left" | "right") => {
+    const toIndex = direction === "left" ? fromIndex - 1 : fromIndex + 1;
+    if (toIndex < 0 || toIndex >= photos.length) return;
+
+    setPhotos((prev) => {
+      const updated = [...prev];
+      const [movedItem] = updated.splice(fromIndex, 1);
+      updated.splice(toIndex, 0, movedItem);
+      return updated;
+    });
+  };
+
+  const sortByTimestamp = () => {
+    setPhotos((prev) => [...prev].sort((a, b) => a.timestamp - b.timestamp));
   };
 
   const handleCreateAlbum = async () => {
@@ -151,6 +213,7 @@ export default function AdminStudioView() {
 
       const uploadedPhotosData: any[] = [];
 
+      // Uploads photos in the exact customized sequence order
       for (let i = 0; i < photos.length; i++) {
         const p = photos[i];
         const photoId = `${albumId}_${String(i + 1).padStart(3, "0")}`;
@@ -215,7 +278,7 @@ export default function AdminStudioView() {
       setDate("");
       setPhotos([]);
       setCoverPhotoUid("");
-      alert("Album successfully created and published!");
+      alert("Album successfully created and published in sequence!");
       loadData();
     } catch (err: any) {
       const msg = typeof err === "string" ? err : err?.message || JSON.stringify(err);
@@ -315,7 +378,7 @@ export default function AdminStudioView() {
 
           <button
             type="submit"
-            className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl text-sm transition"
+            className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl text-sm transition cursor-pointer"
           >
             Unlock Studio
           </button>
@@ -342,7 +405,7 @@ export default function AdminStudioView() {
                 activeTab === "albums" ? "bg-neutral-800 text-white shadow-sm" : "text-neutral-400 hover:text-white"
               }`}
             >
-              <Layers size={14} /> Albums & Uploads
+              <Layers size={14} /> Albums &amp; Uploads
             </button>
             <button
               onClick={() => setActiveTab("settings")}
@@ -350,7 +413,7 @@ export default function AdminStudioView() {
                 activeTab === "settings" ? "bg-neutral-800 text-white shadow-sm" : "text-neutral-400 hover:text-white"
               }`}
             >
-              <Palette size={14} /> Site Design & Categories
+              <Palette size={14} /> Site Design &amp; Categories
             </button>
           </div>
         </div>
@@ -413,7 +476,7 @@ export default function AdminStudioView() {
                 className="border-2 border-dashed border-neutral-800 hover:border-neutral-600 bg-neutral-950/60 rounded-xl p-8 text-center cursor-pointer transition flex flex-col items-center justify-center gap-2"
               >
                 <Upload size={28} className="text-neutral-500" />
-                <p className="text-sm font-semibold text-neutral-300">Drag & drop game photos here, or click to browse</p>
+                <p className="text-sm font-semibold text-neutral-300">Drag &amp; drop game photos here, or click to browse</p>
                 <p className="text-xs text-neutral-500">Supports JPEG and PNG</p>
                 <input
                   id="album-file-input"
@@ -427,28 +490,65 @@ export default function AdminStudioView() {
 
               {photos.length > 0 && (
                 <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-neutral-300">
-                      Selected Photos ({photos.length}) — Click gold star to set cover image
-                    </span>
-                    <button
-                      onClick={() => setPhotos([])}
-                      className="text-xs text-red-400 hover:underline"
-                    >
-                      Clear all
-                    </button>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <span className="text-xs font-semibold text-neutral-200">
+                        Selected Photos ({photos.length})
+                      </span>
+                      <p className="text-[11px] text-neutral-400">
+                        Drag cards to reorder action sequence • Hover for nudge arrows • Star sets cover
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={sortByTimestamp}
+                        className="text-xs text-neutral-400 hover:text-white flex items-center gap-1 transition"
+                        title="Reset sequence to camera timestamp order"
+                      >
+                        <Clock size={12} />
+                        <span>Sort by Time</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPhotos([])}
+                        className="text-xs text-red-400 hover:underline"
+                      >
+                        Clear all
+                      </button>
+                    </div>
                   </div>
+
+                  {/* Reorderable Photo Grid */}
                   <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2.5">
-                    {photos.map((p) => {
+                    {photos.map((p, idx) => {
                       const isCover = coverPhotoUid === p.uid;
+                      const isDragged = draggedIdx === idx;
+                      const isDragOver = dragOverIdx === idx;
+
                       return (
                         <div
                           key={p.uid}
-                          className={`relative aspect-4/3 rounded-lg overflow-hidden border ${
+                          draggable
+                          onDragStart={(e) => handleDragStart(e, idx)}
+                          onDragOver={(e) => handleDragOver(e, idx)}
+                          onDrop={(e) => handleDrop(e, idx)}
+                          onDragEnd={handleDragEnd}
+                          className={`relative aspect-4/3 rounded-lg overflow-hidden border cursor-grab active:cursor-grabbing transition-all ${
                             isCover ? "border-amber-500 ring-2 ring-amber-500/40" : "border-neutral-800"
+                          } ${isDragged ? "opacity-30 scale-95" : "opacity-100"} ${
+                            isDragOver ? "border-blue-500 ring-2 ring-blue-500/50 scale-105" : ""
                           } bg-neutral-900 group`}
                         >
-                          <img src={p.previewUrl} alt={p.originalName} className="w-full h-full object-cover" />
+                          <img src={p.previewUrl} alt={p.originalName} className="w-full h-full object-cover pointer-events-none" />
+
+                          {/* Sequence index badge */}
+                          <div className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/75 backdrop-blur-md text-[10px] font-mono font-bold text-neutral-200 pointer-events-none">
+                            #{idx + 1}
+                          </div>
+
+                          {/* Top controls: Cover Star and Delete */}
                           <button
                             type="button"
                             onClick={() => setCoverPhotoUid(p.uid)}
@@ -459,6 +559,7 @@ export default function AdminStudioView() {
                           >
                             <Star size={11} fill={isCover ? "currentColor" : "none"} />
                           </button>
+
                           <button
                             type="button"
                             onClick={() => setPhotos(photos.filter((x) => x.uid !== p.uid))}
@@ -467,6 +568,41 @@ export default function AdminStudioView() {
                           >
                             <Trash2 size={11} />
                           </button>
+
+                          {/* Center Drag Handle Visual Indicator */}
+                          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition pointer-events-none">
+                            <span className="p-1 rounded-md bg-black/70 text-white backdrop-blur-sm shadow-md">
+                              <GripVertical size={14} />
+                            </span>
+                          </div>
+
+                          {/* Bottom Quick Nudge Arrows */}
+                          <div className="absolute bottom-1.5 right-1.5 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+                            <button
+                              type="button"
+                              disabled={idx === 0}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                movePhotoStep(idx, "left");
+                              }}
+                              className="p-1 rounded bg-black/70 hover:bg-neutral-800 disabled:opacity-30 text-white transition"
+                              title="Move photo earlier in sequence"
+                            >
+                              <ChevronLeft size={12} />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={idx === photos.length - 1}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                movePhotoStep(idx, "right");
+                              }}
+                              className="p-1 rounded bg-black/70 hover:bg-neutral-800 disabled:opacity-30 text-white transition"
+                              title="Move photo later in sequence"
+                            >
+                              <ChevronRight size={12} />
+                            </button>
+                          </div>
                         </div>
                       );
                     })}
@@ -547,7 +683,7 @@ export default function AdminStudioView() {
         ) : (
           <section className="bg-neutral-900/50 border border-neutral-800/80 rounded-2xl p-6 md:p-8 space-y-8 max-w-3xl">
             <div>
-              <h2 className="text-lg font-bold text-white">Site Design & Categories</h2>
+              <h2 className="text-lg font-bold text-white">Site Design &amp; Categories</h2>
               <p className="text-xs text-neutral-400">Configure global hero titles, presets, and category folder tabs</p>
             </div>
 
@@ -685,7 +821,7 @@ export default function AdminStudioView() {
                 <h3 className="text-base font-bold text-white">Delete Album</h3>
                 <p className="text-xs text-neutral-400 leading-relaxed">
                   Are you sure you want to permanently delete{" "}
-                  <span className="text-white font-semibold">"{albumToDelete.title}"</span>?
+                  <span className="text-white font-semibold">&quot;{albumToDelete.title}&quot;</span>?
                   This removes the album from the public directory.
                 </p>
               </div>

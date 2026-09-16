@@ -55,7 +55,10 @@ export default function PublicAlbumView() {
   const params = useParams();
   const searchParams = useSearchParams();
   const rawId = params?.id;
-  const albumId = Array.isArray(rawId) ? rawId[0] : (rawId as string) || "";
+  // Join nested arrays (e.g. ['Sports', 'Canes_Baseball'] -> 'Sports/Canes_Baseball')
+  const albumId = Array.isArray(rawId)
+    ? rawId.map((segment) => decodeURIComponent(segment)).join("/")
+    : decodeURIComponent((rawId as string) || "");
 
   const viewerName = searchParams?.get("v");
 
@@ -334,8 +337,7 @@ export default function PublicAlbumView() {
         return;
       }
 
-      const decodedId = decodeURIComponent(albumId);
-      const manifestUrl = `${baseUrl}/${decodedId}/manifest.json`;
+      const manifestUrl = `${baseUrl}/${albumId}/manifest.json`;
 
       try {
         const res = await fetch(manifestUrl, { cache: "no-store" });
