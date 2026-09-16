@@ -23,25 +23,31 @@ import {
   CheckSquare,
   Square,
   Package,
+  Play,
 } from "lucide-react";
 import SupportModal, { FundType } from "@/components/SupportModal";
 import ShareModal from "@/components/ShareModal";
 import ViewerPresenceBadge from "@/components/ViewerPresenceBadge";
 
-interface Photo {
+export type MediaType = "image" | "video";
+
+export interface Photo {
   id: string;
   original_filename: string;
   width: number;
   height: number;
   aspect_ratio: number;
+  type?: MediaType;
+  duration?: number;
   urls: {
     thumb: string;
     display: string;
     original: string;
   };
+  metadata?: any;
 }
 
-interface AlbumData {
+export interface AlbumData {
   album_id: string;
   title: string;
   date: string;
@@ -50,6 +56,13 @@ interface AlbumData {
 }
 
 type TouchMode = "idle" | "swiping" | "pinching" | "panning";
+
+function formatDuration(seconds?: number): string {
+  if (!seconds || isNaN(seconds)) return "";
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
 
 export default function PublicAlbumView() {
   const params = useParams();
@@ -103,7 +116,7 @@ export default function PublicAlbumView() {
   const photos = album?.photos || [];
   const selectedPhoto = selectedIndex !== null ? photos[selectedIndex] : null;
 
-  // Reset zoom & pan synchronously when changing photos or closing
+  // Reset zoom & pan synchronously when changing media or closing
   useEffect(() => {
     zoomScaleRef.current = 1;
     panOffsetRef.current = { x: 0, y: 0 };
@@ -113,9 +126,10 @@ export default function PublicAlbumView() {
     setDragOffset(0);
   }, [selectedIndex]);
 
-  // Silent Background High-Res Master Preload
+  // Silent Background High-Res Master Preload (Images only)
   useEffect(() => {
     if (selectedIndex === null || !selectedPhoto) return;
+    if (selectedPhoto.type === "video") return;
     const photoId = selectedPhoto.id;
     const originalUrl = selectedPhoto.urls.original;
 
@@ -128,7 +142,7 @@ export default function PublicAlbumView() {
     };
   }, [selectedIndex, selectedPhoto, loadedHighResIds]);
 
-  // Background Image Preloader for Adjacent Slides
+  // Background Image Preloader for Adjacent Slides (Images only)
   useEffect(() => {
     if (selectedIndex === null || photos.length === 0) return;
     const indicesToPreload = [
@@ -137,9 +151,10 @@ export default function PublicAlbumView() {
       (selectedIndex - 1 + photos.length) % photos.length,
     ];
     indicesToPreload.forEach((idx) => {
-      if (photos[idx]?.urls?.display) {
+      const item = photos[idx];
+      if (item?.urls?.display && item.type !== "video") {
         const img = new Image();
-        img.src = photos[idx].urls.display;
+        img.src = item.urls.display;
       }
     });
   }, [selectedIndex, photos]);
@@ -152,6 +167,9 @@ export default function PublicAlbumView() {
 
   // Touch Gestures
   const handleTouchStart = (e: React.TouchEvent) => {
+    // If viewing a video, do not hijack touch events
+    if (selectedPhoto?.type === "video") return;
+
     // 1. Two-finger Pinch Zoom Start
     if (e.touches.length === 2) {
       touchMode.current = "pinching";
@@ -206,6 +224,8 @@ export default function PublicAlbumView() {
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
+    if (selectedPhoto?.type === "video") return;
+
     // Active Pinch Zoom
     if (touchMode.current === "pinching" && e.touches.length === 2 && pinchStartDist.current > 0) {
       const currentDist = Math.hypot(
@@ -246,6 +266,8 @@ export default function PublicAlbumView() {
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
+    if (selectedPhoto?.type === "video") return;
+
     if (isDoubleTap.current) {
       isDoubleTap.current = false;
       touchMode.current = "idle";
@@ -287,7 +309,7 @@ export default function PublicAlbumView() {
         const deltaX = endX - touchStartPos.current.x;
         const deltaY = endY - touchStartPos.current.y;
 
-        // Next / Prev photo (dominant horizontal swipe > 60px)
+        // Next / Prev media (dominant horizontal swipe > 60px)
         if (Math.abs(deltaX) > 60 && Math.abs(deltaX) > Math.abs(deltaY) * 1.5) {
           if (deltaX < 0) {
             showNext();
@@ -337,7 +359,12 @@ export default function PublicAlbumView() {
         return;
       }
 
-      const manifestUrl = `${baseUrl}/${albumId}/manifest.json`;
+      const encodedPath = albumId
+        .split("/")
+        .map((segment) => encodeURIComponent(segment))
+        .join("/");
+
+      const manifestUrl = `${baseUrl}/${encodedPath}/manifest.json`;
 
       try {
         const res = await fetch(manifestUrl, { cache: "no-store" });
@@ -402,7 +429,7 @@ export default function PublicAlbumView() {
     }
   };
 
-  // Batch ZIP Export Generator
+  // Batch ZIP Export Generator (Handles both full-res photos and video clips)
   const handleDownloadBatch = async (photosToDownload?: Photo[]) => {
     if (!album) return;
     const targetPhotos = photosToDownload || album.photos.filter((p) => selectedIds.has(p.id));
@@ -413,7 +440,7 @@ export default function PublicAlbumView() {
 
     try {
       const zip = new JSZip();
-      const folderName = `${album.title.replace(/[^a-z0-9_-]/gi, "_")}_HighRes`;
+      const folderName = `${album.title.replace(/[^a-z0-9_-]/gi, "_")}_Media`;
       const folder = zip.folder(folderName) || zip;
 
       const CONCURRENCY = 3;
@@ -424,10 +451,14 @@ export default function PublicAlbumView() {
         await Promise.all(
           chunk.map(async (photo, chunkIndex) => {
             const indexNumber = i + chunkIndex + 1;
+            const isVideo = photo.type === "video";
             const ext = photo.original_filename.includes(".")
               ? photo.original_filename.substring(photo.original_filename.lastIndexOf("."))
+              : isVideo
+              ? ".mp4"
               : ".jpg";
-            const fileName = `${String(indexNumber).padStart(3, "0")}_${photo.original_filename || `photo_${photo.id}${ext}`}`;
+
+            const fileName = `${String(indexNumber).padStart(3, "0")}_${photo.original_filename || `media_${photo.id}${ext}`}`;
 
             try {
               const res = await fetch(photo.urls.original);
@@ -435,9 +466,11 @@ export default function PublicAlbumView() {
               const blob = await res.blob();
               folder.file(fileName, blob);
             } catch {
-              const fallbackRes = await fetch(photo.urls.display);
-              const fallbackBlob = await fallbackRes.blob();
-              folder.file(fileName.replace(/\.[^.]+$/, ".webp"), fallbackBlob);
+              if (!isVideo && photo.urls.display) {
+                const fallbackRes = await fetch(photo.urls.display);
+                const fallbackBlob = await fallbackRes.blob();
+                folder.file(fileName.replace(/\.[^.]+$/, ".webp"), fallbackBlob);
+              }
             }
 
             completed++;
@@ -518,7 +551,7 @@ export default function PublicAlbumView() {
     exitLightbox();
   };
 
-  const handleDownload = async (e: React.MouseEvent, url: string, filename: string) => {
+  const handleDownload = async (e: React.MouseEvent, url: string, filename: string, isVideo = false) => {
     e.stopPropagation();
     setShowDownloadToast(true);
 
@@ -528,7 +561,7 @@ export default function PublicAlbumView() {
       const blobUrl = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = blobUrl;
-      link.download = filename || "photo.jpg";
+      link.download = filename || (isVideo ? "video.mp4" : "photo.jpg");
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -537,7 +570,7 @@ export default function PublicAlbumView() {
       const link = document.createElement("a");
       link.href = url;
       link.target = "_blank";
-      link.download = filename || "photo.jpg";
+      link.download = filename || (isVideo ? "video.mp4" : "photo.jpg");
       link.click();
     }
   };
@@ -656,14 +689,14 @@ export default function PublicAlbumView() {
             <button
               onClick={() => openSupport("gear")}
               className="flex items-center gap-1.5 text-xs font-mono text-neutral-300 hover:text-white transition py-1.5 px-3 rounded-lg bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 cursor-pointer shadow-sm"
-              title="Sideline Support & Gear Funds"
+              title="Sideline Support &amp; Gear Funds"
             >
               <Coffee size={12} className="text-amber-400" />
               <span className="hidden sm:inline">SUPPORT</span>
             </button>
 
             <span className="text-xs font-mono text-neutral-500 flex items-center gap-1 pl-1">
-              <Layers size={12} /> {photos.length} photos
+              <Layers size={12} /> {photos.length} items
             </span>
           </div>
         </div>
@@ -711,10 +744,12 @@ export default function PublicAlbumView() {
           </div>
         </div>
 
-        {/* Dynamic Masonry Grid */}
+        {/* Dynamic Masonry Grid (Photos + Video Posters) */}
         <div className="columns-2 sm:columns-3 md:columns-4 gap-4">
           {photos.map((photo, idx) => {
             const isFav = selectedIds.has(photo.id);
+            const isVideo = photo.type === "video";
+
             return (
               <div
                 key={photo.id}
@@ -728,6 +763,14 @@ export default function PublicAlbumView() {
                   loading="lazy"
                   style={photo.aspect_ratio ? { aspectRatio: `${photo.aspect_ratio}` } : undefined}
                 />
+
+                {/* Video Play Badge & Duration Indicator */}
+                {isVideo && (
+                  <div className="absolute bottom-2 left-2 flex items-center gap-1.5 px-2 py-1 rounded-md bg-black/75 backdrop-blur-md text-[11px] font-mono text-white pointer-events-none shadow-md">
+                    <Play size={10} className="fill-white text-white" />
+                    {photo.duration ? <span>{formatDuration(photo.duration)}</span> : <span>VIDEO</span>}
+                  </div>
+                )}
 
                 <button
                   type="button"
@@ -748,9 +791,9 @@ export default function PublicAlbumView() {
                   </span>
                   <button
                     type="button"
-                    onClick={(e) => handleDownload(e, photo.urls.original, photo.original_filename)}
+                    onClick={(e) => handleDownload(e, photo.urls.original, photo.original_filename, isVideo)}
                     className="p-2 rounded-full bg-black/60 text-white hover:text-blue-400 backdrop-blur-md transition cursor-pointer pointer-events-auto"
-                    title="Download High-Res Original"
+                    title={isVideo ? "Download Video" : "Download High-Res Original"}
                   >
                     <Download size={16} />
                   </button>
@@ -791,7 +834,7 @@ export default function PublicAlbumView() {
         </div>
       )}
 
-      {/* Lightbox Modal */}
+      {/* Lightbox Modal (Unified Photos & Video Player) */}
       {selectedPhoto !== null && selectedIndex !== null && (
         <div
           className={`fixed inset-0 z-50 bg-black flex items-center justify-center select-none overflow-hidden touch-none ${
@@ -838,7 +881,14 @@ export default function PublicAlbumView() {
 
                 <button
                   type="button"
-                  onClick={(e) => handleDownload(e, selectedPhoto.urls.original, selectedPhoto.original_filename)}
+                  onClick={(e) =>
+                    handleDownload(
+                      e,
+                      selectedPhoto.urls.original,
+                      selectedPhoto.original_filename,
+                      selectedPhoto.type === "video"
+                    )
+                  }
                   className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur-md transition cursor-pointer"
                 >
                   <Download size={13} />
@@ -856,7 +906,7 @@ export default function PublicAlbumView() {
                 </button>
               </div>
 
-              {/* Desktop Next / Prev Chevron Click Targets */}
+              {/* Desktop Next / Prev Chevrons */}
               {photos.length > 1 && (
                 <>
                   <button
@@ -865,7 +915,7 @@ export default function PublicAlbumView() {
                       showPrev();
                     }}
                     className="hidden sm:block absolute left-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-md transition z-50 cursor-pointer"
-                    title="Previous Photo (Left Arrow)"
+                    title="Previous (Left Arrow)"
                   >
                     <ChevronLeft size={28} />
                   </button>
@@ -875,35 +925,56 @@ export default function PublicAlbumView() {
                       showNext();
                     }}
                     className="hidden sm:block absolute right-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-md transition z-50 cursor-pointer"
-                    title="Next Photo (Right Arrow)"
+                    title="Next (Right Arrow)"
                   >
                     <ChevronRight size={28} />
                   </button>
                 </>
               )}
 
-              {/* Standard Photo Display with Subpixel Precision */}
-              <div
-                className="max-h-[85vh] max-w-[85vw] flex items-center justify-center transition-transform ease-out"
-                style={{
-                  transform: `translate3d(${dragOffset + panOffset.x}px, ${panOffset.y}px, 0px) scale(${zoomScale})`,
-                  transitionDuration: touchMode.current !== "idle" || zoomScale > 1 ? "0ms" : "150ms",
-                  touchAction: "none",
-                  willChange: touchMode.current !== "idle" ? "transform" : "auto",
-                }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <img
-                  src={activeImageSrc}
-                  alt={selectedPhoto.original_filename}
-                  className="max-h-[85vh] max-w-[85vw] object-contain rounded-lg shadow-2xl pointer-events-none select-none"
+              {/* Standard Media Display */}
+              {selectedPhoto.type === "video" ? (
+                <div
+                  className="max-h-[85vh] max-w-[90vw] flex items-center justify-center"
+                  onClick={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
+                  onTouchMove={(e) => e.stopPropagation()}
+                  onTouchEnd={(e) => e.stopPropagation()}
+                >
+                  <video
+                    key={selectedPhoto.id}
+                    src={selectedPhoto.urls.original}
+                    poster={selectedPhoto.urls.thumb}
+                    controls
+                    autoPlay
+                    playsInline
+                    preload="metadata"
+                    className="max-h-[85vh] max-w-[90vw] rounded-lg shadow-2xl bg-black"
+                  />
+                </div>
+              ) : (
+                <div
+                  className="max-h-[85vh] max-w-[85vw] flex items-center justify-center transition-transform ease-out"
                   style={{
-                    imageRendering: "-webkit-optimize-contrast" as any,
-                    WebkitBackfaceVisibility: "hidden",
-                    backfaceVisibility: "hidden",
+                    transform: `translate3d(${dragOffset + panOffset.x}px, ${panOffset.y}px, 0px) scale(${zoomScale})`,
+                    transitionDuration: touchMode.current !== "idle" || zoomScale > 1 ? "0ms" : "150ms",
+                    touchAction: "none",
+                    willChange: touchMode.current !== "idle" ? "transform" : "auto",
                   }}
-                />
-              </div>
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <img
+                    src={activeImageSrc}
+                    alt={selectedPhoto.original_filename}
+                    className="max-h-[85vh] max-w-[85vw] object-contain rounded-lg shadow-2xl pointer-events-none select-none"
+                    style={{
+                      imageRendering: "-webkit-optimize-contrast" as any,
+                      WebkitBackfaceVisibility: "hidden",
+                      backfaceVisibility: "hidden",
+                    }}
+                  />
+                </div>
+              )}
             </>
           )}
 
@@ -911,24 +982,49 @@ export default function PublicAlbumView() {
           {isImmersive && (
             <div
               className="relative w-full h-full flex items-center justify-center transition-transform ease-out"
-              style={{
-                transform: `translate3d(${dragOffset + panOffset.x}px, ${panOffset.y}px, 0px) scale(${zoomScale})`,
-                transitionDuration: touchMode.current !== "idle" || zoomScale > 1 ? "0ms" : "150ms",
-                touchAction: "none",
-                willChange: touchMode.current !== "idle" ? "transform" : "auto",
-              }}
+              style={
+                selectedPhoto.type === "video"
+                  ? undefined
+                  : {
+                      transform: `translate3d(${dragOffset + panOffset.x}px, ${panOffset.y}px, 0px) scale(${zoomScale})`,
+                      transitionDuration: touchMode.current !== "idle" || zoomScale > 1 ? "0ms" : "150ms",
+                      touchAction: "none",
+                      willChange: touchMode.current !== "idle" ? "transform" : "auto",
+                    }
+              }
               onClick={(e) => e.stopPropagation()}
             >
-              <img
-                src={activeImageSrc}
-                alt={selectedPhoto.original_filename}
-                className="w-full h-full object-contain pointer-events-none select-none"
-                style={{
-                  imageRendering: "-webkit-optimize-contrast" as any,
-                  WebkitBackfaceVisibility: "hidden",
-                  backfaceVisibility: "hidden",
-                }}
-              />
+              {selectedPhoto.type === "video" ? (
+                <div
+                  className="w-full h-full flex items-center justify-center p-2"
+                  onClick={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
+                  onTouchMove={(e) => e.stopPropagation()}
+                  onTouchEnd={(e) => e.stopPropagation()}
+                >
+                  <video
+                    key={selectedPhoto.id}
+                    src={selectedPhoto.urls.original}
+                    poster={selectedPhoto.urls.thumb}
+                    controls
+                    autoPlay
+                    playsInline
+                    preload="metadata"
+                    className="max-h-full max-w-full rounded-lg shadow-2xl bg-black"
+                  />
+                </div>
+              ) : (
+                <img
+                  src={activeImageSrc}
+                  alt={selectedPhoto.original_filename}
+                  className="w-full h-full object-contain pointer-events-none select-none"
+                  style={{
+                    imageRendering: "-webkit-optimize-contrast" as any,
+                    WebkitBackfaceVisibility: "hidden",
+                    backfaceVisibility: "hidden",
+                  }}
+                />
+              )}
 
               <div
                 className={`pointer-events-none absolute left-4 sm:left-8 top-1/2 -translate-y-1/2 transition-opacity duration-300 z-30 ${
@@ -971,10 +1067,10 @@ export default function PublicAlbumView() {
             </div>
             <div className="space-y-1">
               <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">
-                Packaging High-Res ZIP
+                Packaging Media ZIP
               </h3>
               <p className="text-xs text-neutral-400 font-mono">
-                Photo {zipProgress.current} of {zipProgress.total} ({zipProgress.percent}%)
+                Item {zipProgress.current} of {zipProgress.total} ({zipProgress.percent}%)
               </p>
             </div>
 
@@ -985,7 +1081,7 @@ export default function PublicAlbumView() {
               />
             </div>
             <p className="text-[11px] text-neutral-500">
-              Packing full-resolution originals in memory...
+              Packing full-resolution assets in memory...
             </p>
           </div>
         </div>
@@ -998,7 +1094,7 @@ export default function PublicAlbumView() {
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
               <span className="text-xs font-bold font-mono uppercase tracking-wider text-neutral-200">
-                Full-Res Download Complete
+                Download Complete
               </span>
             </div>
             <button
@@ -1010,7 +1106,7 @@ export default function PublicAlbumView() {
           </div>
 
           <p className="text-xs text-neutral-300 leading-relaxed font-sans">
-            Downloaded high-res! Love the shots? Consider supporting the gear &amp; storage fund.
+            Downloaded high-res media! Love the gallery? Consider supporting the gear &amp; storage fund.
           </p>
 
           <div className="flex items-center justify-end gap-2 pt-1">
